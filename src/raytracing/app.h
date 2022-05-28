@@ -6,6 +6,8 @@
 #include <winrt/base.h>
 #include <wil/resource.h>
 
+#include <vector>
+
 inline constexpr int k_numFrames = 3;
 
 class App {
@@ -21,11 +23,13 @@ private:
   void CreateCommandListAndFence();
 
   void CreatePipeline();
-  void CreateShaderTables();
   void CreateDescriptorHeap();
 
   void CreateResources();
-  void CreateVertexBuffers();
+  void CreateConstantBuffers();
+  void CreateModelBuffers();
+
+  void CreateShaderTables();
   void CreateAccelerationStructures();
 
   void MoveToNextFrame();
@@ -48,6 +52,7 @@ private:
   winrt::com_ptr<ID3D12GraphicsCommandList4> m_cmdList;
 
   winrt::com_ptr<ID3D12RootSignature> m_globalRootSig;
+  winrt::com_ptr<ID3D12RootSignature> m_closestHitRootSig;
 
   winrt::com_ptr<ID3D12StateObject> m_pipeline;
 
@@ -59,14 +64,21 @@ private:
   uint64_t m_missShaderRecordSize;
 
   winrt::com_ptr<ID3D12DescriptorHeap> m_descriptorHeap;
+  uint32_t m_cbvSrvUavHandleSize;
 
   D3D12_CPU_DESCRIPTOR_HANDLE m_filmUavCpuHandle;
   D3D12_GPU_DESCRIPTOR_HANDLE m_filmUavGpuHandle;
 
   winrt::com_ptr<ID3D12Resource> m_film;
 
-  winrt::com_ptr<ID3D12Resource> m_vertexBuffer;
-  winrt::com_ptr<ID3D12Resource> m_indexBuffer;
+  winrt::com_ptr<ID3D12Resource> m_matrixBuffer;
+
+  std::vector<winrt::com_ptr<ID3D12Resource>> m_modelBuffers;
+  std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> m_geometryDescs;
+
+  std::vector<D3D12_GPU_VIRTUAL_ADDRESS> m_normalBuffers;
+  std::vector<D3D12_GPU_VIRTUAL_ADDRESS> m_indexBuffers;
+  std::vector<uint32_t> m_normalBufferStrides;
 
   winrt::com_ptr<ID3D12Resource> m_blas;
   winrt::com_ptr<ID3D12Resource> m_tlas;

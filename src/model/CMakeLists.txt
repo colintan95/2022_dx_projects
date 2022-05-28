@@ -29,3 +29,4 @@ target_include_directories(model PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(model PRIVATE ${PROJECT_SOURCE_DIR}/external/d3dx12)
 
 target_link_libraries(model PRIVATE WIL)
+target_link_libraries(model PRIVATE DirectXMath)
