@@ -21,8 +21,6 @@ add_custom_command(TARGET model POST_BUILD
                    COMMAND ${CMAKE_COMMAND} -E create_symlink ${PROJECT_SOURCE_DIR}/assets
                                             $<TARGET_FILE_DIR:model>/assets)
 
-target_compile_definitions(model PRIVATE UNICODE)
-
 target_link_libraries(model PRIVATE utils)
 
 target_link_libraries(model PRIVATE d3d12.lib dxgi.lib)

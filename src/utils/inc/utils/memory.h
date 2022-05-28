@@ -11,7 +11,7 @@ constexpr size_t GetAlignedSize(size_t size, size_t alignment) {
 }
 
 template<typename T>
-size_t GetAlignedSize(const T& object, size_t alignment) {
+size_t GetAlignedSize(const T&, size_t alignment) {
   return GetAlignedSize(sizeof(T), alignment);
 }
 

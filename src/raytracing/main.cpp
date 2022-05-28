@@ -19,10 +19,10 @@ int WINAPI WinMain(HINSTANCE hinstance, HINSTANCE, LPSTR, int cmdShow) {
   windowClass.lpfnWndProc = WindowProc;
   windowClass.hInstance = hinstance;
   windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
-  windowClass.lpszClassName = L"Model";
+  windowClass.lpszClassName = L"Raytracing";
   RegisterClassEx(&windowClass);
 
-  HWND hwnd = CreateWindow(windowClass.lpszClassName, L"Model", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+  HWND hwnd = CreateWindow(windowClass.lpszClassName, L"Raytracing", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                            CW_USEDEFAULT, 1084, 768, nullptr, nullptr, hinstance, nullptr);
   ShowWindow(hwnd, cmdShow);
 

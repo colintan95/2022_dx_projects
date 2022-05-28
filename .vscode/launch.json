@@ -7,6 +7,13 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/src/model/Debug/model.exe",
       "cwd": "${workspaceFolder}/build/src/model/Debug"
+    },
+    {
+      "name": "raytracing.exe",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/src/raytracing/Debug/raytracing.exe",
+      "cwd": "${workspaceFolder}/build/src/raytracing/Debug"
     }
   ]
 }
