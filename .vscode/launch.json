@@ -2,11 +2,11 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "triangle.exe",
+      "name": "model.exe",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/src/triangle/Debug/triangle.exe",
-      "cwd": "${workspaceFolder}/build/src/triangle/Debug"
+      "program": "${workspaceFolder}/build/src/model/Debug/model.exe",
+      "cwd": "${workspaceFolder}/build/src/model/Debug"
     }
   ]
 }

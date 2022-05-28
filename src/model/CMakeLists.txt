@@ -1,4 +1,4 @@
-add_executable(triangle WIN32
+add_executable(model WIN32
                app.cpp
                app.h
                gen/shader_vs.h
@@ -17,10 +17,17 @@ add_custom_command(OUTPUT gen/shader_ps.h
                    WORKING_DIRECTORY gen
                    MAIN_DEPENDENCY shader.hlsl)
 
-target_compile_definitions(triangle PRIVATE UNICODE)
+add_custom_command(TARGET model POST_BUILD
+                   COMMAND ${CMAKE_COMMAND} -E create_symlink ${PROJECT_SOURCE_DIR}/assets
+                                            $<TARGET_FILE_DIR:model>/assets)
 
-target_include_directories(triangle PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_include_directories(triangle PRIVATE ${PROJECT_SOURCE_DIR}/external/d3dx12)
+target_compile_definitions(model PRIVATE UNICODE)
 
-target_link_libraries(triangle PRIVATE WIL)
-target_link_libraries(triangle PRIVATE WindowsApp.lib) # cppwinrt
+target_link_libraries(model PRIVATE utils)
+
+target_link_libraries(model PRIVATE d3d12.lib dxgi.lib)
+
+target_include_directories(model PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(model PRIVATE ${PROJECT_SOURCE_DIR}/external/d3dx12)
+
+target_link_libraries(model PRIVATE WIL)

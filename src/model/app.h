@@ -6,6 +6,8 @@
 #include <winrt/base.h>
 #include <wil/resource.h>
 
+#include <vector>
+
 inline constexpr int k_numFrames = 3;
 
 class App {
@@ -25,6 +27,7 @@ private:
 
   void CreateDepthTexture();
   void CreateVertexBuffers();
+  void CreateConstantBuffer();
 
   void MoveToNextFrame();
   void WaitForGpu();
@@ -61,8 +64,23 @@ private:
 
   winrt::com_ptr<ID3D12Resource> m_depthTexture;
 
-  winrt::com_ptr<ID3D12Resource> m_vertexBuffer;
-  D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+  std::vector<winrt::com_ptr<ID3D12Resource>> m_vertexBuffers;
+
+  struct Primitive {
+    D3D12_VERTEX_BUFFER_VIEW Positions;
+    D3D12_VERTEX_BUFFER_VIEW Normals;
+    D3D12_INDEX_BUFFER_VIEW Indices;
+    uint32_t NumVertices;
+  };
+  std::vector<Primitive> m_primitives;
+
+  struct MatrixBuffer {
+    DirectX::XMFLOAT4X4 WorldMat;
+    DirectX::XMFLOAT4X4 WorldViewProjMat;
+  };
+  MatrixBuffer m_matrixBuffer;
+
+  winrt::com_ptr<ID3D12Resource> m_constantBuffer;
 
   struct Frame {
     winrt::com_ptr<ID3D12Resource> SwapChainBuffer;

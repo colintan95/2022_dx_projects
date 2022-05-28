@@ -1,3 +1,9 @@
 [submodule "external/wil"]
 	path = external/wil
 	url = https://github.com/microsoft/wil.git
+[submodule "external/json"]
+	path = external/json
+	url = https://github.com/nlohmann/json.git
+[submodule "external/DirectXMath"]
+	path = external/DirectXMath
+	url = https://github.com/microsoft/DirectXMath.git

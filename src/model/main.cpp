@@ -19,12 +19,11 @@ int WINAPI WinMain(HINSTANCE hinstance, HINSTANCE prevHinstance, LPSTR cmdLine, 
   windowClass.lpfnWndProc = WindowProc;
   windowClass.hInstance = hinstance;
   windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
-  windowClass.lpszClassName = L"Triangle";
+  windowClass.lpszClassName = L"Model";
   RegisterClassEx(&windowClass);
 
-  HWND hwnd = CreateWindow(windowClass.lpszClassName, L"Triangle", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 1084, 768, nullptr, nullptr, hinstance,
-                           nullptr);
+  HWND hwnd = CreateWindow(windowClass.lpszClassName, L"Model", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+                           CW_USEDEFAULT, 1084, 768, nullptr, nullptr, hinstance, nullptr);
   ShowWindow(hwnd, cmdShow);
 
   App app(hwnd);

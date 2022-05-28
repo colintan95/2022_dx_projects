@@ -1,9 +1,15 @@
 #include "app.h"
 
 #include <d3dx12.h>
+#include <DirectXMath.h>
+
+#include <utils/gltf_loader.h>
+#include <utils/memory.h>
 
 #include "gen/shader_ps.h"
 #include "gen/shader_vs.h"
+
+using namespace DirectX;
 
 using winrt::check_bool;
 using winrt::check_hresult;
@@ -25,6 +31,7 @@ App::App(HWND hwnd) : m_hwnd(hwnd) {
 
   CreateDepthTexture();
   CreateVertexBuffers();
+  CreateConstantBuffer();
 }
 
 void App::CreateDevice() {
@@ -107,8 +114,15 @@ void App::CreateCommandListAndFence() {
 }
 
 void App::CreatePipeline() {
+  CD3DX12_DESCRIPTOR_RANGE1 range{};
+  range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
+
+  CD3DX12_ROOT_PARAMETER1 rootParam{};
+  rootParam.InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE,
+                                     D3D12_SHADER_VISIBILITY_VERTEX);
+
   CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSigDesc;
-  rootSigDesc.Init_1_1(0, nullptr, 0, nullptr,
+  rootSigDesc.Init_1_1(1, &rootParam, 0, nullptr,
                        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
   com_ptr<ID3DBlob> signatureBlob;
@@ -122,6 +136,7 @@ void App::CreatePipeline() {
   D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
     {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
      0},
+    {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 1, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
   };
 
   D3D12_INPUT_LAYOUT_DESC inputLayoutDesc{};
@@ -198,48 +213,60 @@ void App::CreateDepthTexture() {
 }
 
 void App::CreateVertexBuffers() {
-  static constexpr float posData[] = {
-    -0.5f, -0.5f, 0.f,
-    0.f, 0.5f, 0.f,
-    0.5f, -0.5f, 0.f
-  };
+  utils::Scene scene = utils::LoadGltf("assets/cube.gltf");
 
   check_hresult(m_cmdAlloc->Reset());
   check_hresult(m_cmdList->Reset(m_cmdAlloc.get(), nullptr));
 
-  size_t bufferSize = sizeof(posData);
+  std::vector<com_ptr<ID3D12Resource>> uploadBuffers;
 
-  com_ptr<ID3D12Resource> uploadBuffer;
+  for (auto& bufferData : scene.Buffers) {
+    com_ptr<ID3D12Resource> buffer;
+    com_ptr<ID3D12Resource> uploadBuffer;
 
-  CD3DX12_HEAP_PROPERTIES uploadHeapProps(D3D12_HEAP_TYPE_UPLOAD);
-  CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+    utils::CreateBuffersAndUpload(m_cmdList.get(), bufferData, m_device.get(), buffer.put(),
+                                  uploadBuffer.put());
 
-  check_hresult(m_device->CreateCommittedResource(&uploadHeapProps, D3D12_HEAP_FLAG_NONE,
-                                                  &uploadBufferDesc,
-                                                  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                  IID_PPV_ARGS(uploadBuffer.put())));
+    m_vertexBuffers.push_back(buffer);
+    uploadBuffers.push_back(uploadBuffer);
+  }
 
-  void* ptr;
-  check_hresult(uploadBuffer->Map(0, nullptr, &ptr));
+  for (auto& meshData : scene.Meshes) {
+    for (auto& primData : meshData.Primitives) {
+      Primitive prim{};
 
-  memcpy(ptr, reinterpret_cast<const void*>(posData), bufferSize);
+      {
+        utils::BufferView* viewData = primData.Positions->BufferView;
 
-  uploadBuffer->Unmap(0, nullptr);
+        prim.Positions.BufferLocation =
+            m_vertexBuffers[viewData->BufferIndex]->GetGPUVirtualAddress() + viewData->Offset;
+        prim.Positions.SizeInBytes = viewData->Length;
+        prim.Positions.StrideInBytes = *viewData->Stride;
+      }
 
-  CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
-  CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+      {
+        utils::BufferView* viewData = primData.Normals->BufferView;
 
-  check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
-                                                  D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                                                  IID_PPV_ARGS(m_vertexBuffer.put())));
+        prim.Normals.BufferLocation =
+            m_vertexBuffers[viewData->BufferIndex]->GetGPUVirtualAddress() + viewData->Offset;
+        prim.Normals.SizeInBytes = viewData->Length;
+        prim.Normals.StrideInBytes = *viewData->Stride;
+      }
 
-  m_cmdList->CopyBufferRegion(m_vertexBuffer.get(), 0, uploadBuffer.get(), 0, bufferSize);
+      {
+        utils::BufferView* viewData = primData.Indices->BufferView;
 
-  auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-      m_vertexBuffer.get(), D3D12_RESOURCE_STATE_COPY_DEST,
-      D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+        prim.Indices.BufferLocation =
+            m_vertexBuffers[viewData->BufferIndex]->GetGPUVirtualAddress() + viewData->Offset;
+        prim.Indices.SizeInBytes = viewData->Length;
+        prim.Indices.Format = DXGI_FORMAT_R16_UINT;
 
-  m_cmdList->ResourceBarrier(1, &barrier);
+        prim.NumVertices = primData.Indices->Count;
+      }
+
+      m_primitives.push_back(prim);
+    }
+  }
 
   check_hresult(m_cmdList->Close());
 
@@ -247,10 +274,44 @@ void App::CreateVertexBuffers() {
   m_cmdQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 
   WaitForGpu();
+}
 
-  m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-  m_vertexBufferView.SizeInBytes = bufferSize;
-  m_vertexBufferView.StrideInBytes = sizeof(float) * 3;
+void App::CreateConstantBuffer() {
+  XMMATRIX worldMat = XMMatrixRotationY(XM_PI / 6.f);
+
+  float cameraRoll = 0.f;
+  float cameraYaw = 0.f;
+  float cameraPitch = XM_PI / 8.f;
+
+  XMMATRIX cameraViewMat =
+      XMMatrixRotationY(-cameraYaw) * XMMatrixRotationX(-cameraPitch) *
+      XMMatrixRotationZ(-cameraRoll);
+
+  XMMATRIX viewMat = XMMatrixTranslation(0.f, -2.2f, 6.f) * cameraViewMat;
+  XMMATRIX projMat = XMMatrixPerspectiveFovLH(
+      XM_PI / 4.f, static_cast<float>(m_windowWidth) / static_cast<float>(m_windowHeight), 0.1f,
+      1000.f);
+
+  XMStoreFloat4x4(&m_matrixBuffer.WorldMat, XMMatrixTranspose(worldMat));
+  XMStoreFloat4x4(&m_matrixBuffer.WorldViewProjMat,
+                  XMMatrixTranspose(worldMat * viewMat * projMat));
+
+  size_t bufferSize = utils::GetAlignedSize(m_matrixBuffer,
+                                            D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+
+  CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+  CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+  check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE,
+                                                  &bufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                  nullptr, IID_PPV_ARGS(m_constantBuffer.put())));
+
+  MatrixBuffer* ptr;
+  check_hresult(m_constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
+
+  *ptr = m_matrixBuffer;
+
+  m_constantBuffer->Unmap(0, nullptr);
 }
 
 App::~App() {
@@ -271,6 +332,8 @@ void App::RenderFrame() {
   m_cmdList->SetPipelineState(m_pipeline.get());
   m_cmdList->SetGraphicsRootSignature(m_rootSig.get());
 
+  m_cmdList->SetGraphicsRootConstantBufferView(0, m_constantBuffer->GetGPUVirtualAddress());
+
   m_cmdList->RSSetViewports(1, &m_viewport);
   m_cmdList->RSSetScissorRects(1, &m_scissorRect);
 
@@ -281,10 +344,15 @@ void App::RenderFrame() {
   m_cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   m_cmdList->ClearDepthStencilView(m_dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 
-  m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  m_cmdList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+  for (Primitive& prim : m_primitives) {
+    m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-  m_cmdList->DrawInstanced(3, 1, 0, 0);
+    D3D12_VERTEX_BUFFER_VIEW bufferViews[] = { prim.Positions, prim.Normals };
+    m_cmdList->IASetVertexBuffers(0, _countof(bufferViews), bufferViews);
+    m_cmdList->IASetIndexBuffer(&prim.Indices);
+
+    m_cmdList->DrawIndexedInstanced(prim.NumVertices, 1, 0, 0, 0);
+  }
 
   {
     auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
