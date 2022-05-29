@@ -69,7 +69,7 @@ private:
   winrt::com_ptr<ID3D12Resource> m_missShaderTable;
 
   uint64_t m_hitGroupShaderRecordSize;
-  uint64_t m_missShaderRecordSize;
+  uint64_t m_missShaderRecordStride;
 
   winrt::com_ptr<ID3D12DescriptorHeap> m_descriptorHeap;
   uint32_t m_cbvSrvUavHandleSize;

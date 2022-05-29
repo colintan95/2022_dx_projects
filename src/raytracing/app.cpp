@@ -18,7 +18,8 @@ using winrt::com_ptr;
 
 const wchar_t* k_rayGenShaderName = L"RayGenShader";
 const wchar_t* k_closestHitShaderName = L"ClosestHitShader";
-const wchar_t* k_missShaderName = L"MissShader";
+const wchar_t* k_lightMissShaderName = L"LightMissShader";
+const wchar_t* k_shadowMissShaderName = L"ShadowMissShader";
 
 const wchar_t* k_hitGroupName = L"HitGroup";
 
@@ -178,7 +179,9 @@ void App::CreatePipeline() {
                                            sizeof(g_shaderSrc));
   dxilLib->SetDXILLibrary(&shaderSrc);
 
-  const wchar_t* shaderNames[] = { k_rayGenShaderName, k_closestHitShaderName, k_missShaderName };
+  const wchar_t* shaderNames[] = {
+    k_rayGenShaderName, k_closestHitShaderName, k_lightMissShaderName, k_shadowMissShaderName
+  };
   dxilLib->DefineExports(shaderNames);
 
   auto* shaderConfig = pipelineDesc.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
@@ -345,8 +348,17 @@ struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) HitGroupShaderReco
   alignas(sizeof(ClosestHitConstants)) ClosestHitConstants Constants;
 };
 
-struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) MissShaderRecord {
+struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) LightMissShaderRecord {
   uint8_t ShaderId[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+};
+
+struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) ShadowMissShaderRecord {
+  uint8_t ShaderId[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+};
+
+union alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) MissShaderRecord {
+  LightMissShaderRecord LightMissShaderRecord;
+  ShadowMissShaderRecord ShadowMissShaderRecord;
 };
 
 #pragma warning(pop)
@@ -420,22 +432,28 @@ void App::CreateShaderTables() {
   }
 
   {
-    m_missShaderRecordSize = sizeof(MissShaderRecord);
+    m_missShaderRecordStride = sizeof(MissShaderRecord);
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-    CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(m_missShaderRecordSize);
+    CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(m_missShaderRecordStride * 2);
 
     check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE,
                                                     &bufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
                                                     nullptr,
                                                     IID_PPV_ARGS(m_missShaderTable.put())));
 
-    void* shaderId = pipelineProps->GetShaderIdentifier(k_missShaderName);
+    void* lightMissShaderId = pipelineProps->GetShaderIdentifier(k_lightMissShaderName);
+    void* shadowMissShaderId = pipelineProps->GetShaderIdentifier(k_shadowMissShaderName);
 
     MissShaderRecord* ptr;
     check_hresult(m_missShaderTable->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
 
-    memcpy(ptr->ShaderId, shaderId, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    memcpy(ptr->LightMissShaderRecord.ShaderId, lightMissShaderId,
+           D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    ++ptr;
+
+    memcpy(ptr->ShadowMissShaderRecord.ShaderId, shadowMissShaderId,
+           D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
     m_missShaderTable->Unmap(0, nullptr);
   }
@@ -620,7 +638,7 @@ void App::RenderFrame() {
 
   dispatchDesc.MissShaderTable.StartAddress = m_missShaderTable->GetGPUVirtualAddress();
   dispatchDesc.MissShaderTable.SizeInBytes = m_missShaderTable->GetDesc().Width;
-  dispatchDesc.MissShaderTable.StrideInBytes = m_missShaderRecordSize;
+  dispatchDesc.MissShaderTable.StrideInBytes = m_missShaderRecordStride;
 
   dispatchDesc.Width = m_windowWidth;
   dispatchDesc.Height = m_windowHeight;

@@ -80,6 +80,10 @@ float3 InterpolateVertexAttr(float3 vertAttr[3], IntersectAttributes attr) {
          attr.barycentrics.y * (vertAttr[2] - vertAttr[0]);
 }
 
+struct ShadowRayPayload {
+  bool IsOccluded;
+};
+
 [shader("closesthit")]
 void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   // Stride of indices in triangle is index size in bytes * indices per triangle => 2 * 3 = 6.
@@ -98,15 +102,36 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float3 hitPos = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
 
   float3 lightPos = float3(0.f, 1.9f, 0.f);
-  float3 lightDir = normalize(lightPos - hitPos);
+
+  float3 lightDistVec = lightPos - hitPos;
+  float3 lightDir = normalize(lightDistVec);
 
   float3 diffuse =
       clamp(dot(lightDir, normal), 0.0, 1.0) * s_material.Roughness.BaseColorFactor.rgb;
 
-  payload.Color = float4(diffuse, 1.f);
+  RayDesc shadowRay;
+  shadowRay.Origin = hitPos;
+  shadowRay.Direction = lightDir;
+  shadowRay.TMin = 0.0;
+  shadowRay.TMax = length(lightDistVec);
+  ShadowRayPayload shadowPayload = { true };
+
+  TraceRay(s_scene,
+           RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
+           RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, ~0, 0, 1, 1, shadowRay,
+           shadowPayload);
+
+  float isIlluminated = shadowPayload.IsOccluded ? 0.0 : 1.0;
+
+  payload.Color = float4(isIlluminated * diffuse, 1.f);
 }
 
 [shader("miss")]
-void MissShader(inout RayPayload payload) {
+void LightMissShader(inout RayPayload payload) {
   payload.Color = float4(0.f, 0.f, 0.f, 1.f);
+}
+
+[shader("miss")]
+void ShadowMissShader(inout ShadowRayPayload payload) {
+  payload.IsOccluded = false;
 }
