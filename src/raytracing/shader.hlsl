@@ -1,4 +1,4 @@
-#pragma pack_matrix(row_major)
+#include "shader.h"
 
 // Global descriptors.
 
@@ -11,14 +11,11 @@ struct ClosestHitMatrices {
   float3x4 Transform;
 };
 
-struct ClosestHitConstants {
-  uint NormalBufferStride;
-};
-
 ByteAddressBuffer s_normalBuffer : register(t1);
 ByteAddressBuffer s_indexBuffer : register(t2);
 ConstantBuffer<ClosestHitMatrices> s_matrixBuffer : register(b0);
-ConstantBuffer<ClosestHitConstants> s_closestHitConstants : register(b1);
+ConstantBuffer<Material> s_material : register(b1);
+ConstantBuffer<ClosestHitConstants> s_closestHitConstants : register(b2);
 
 // ConstantBuffer<RayGenConstantBuffer> s_rayGenConstants : register(b0);
 
@@ -89,11 +86,11 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   uint indexBufferOffset = PrimitiveIndex() * 2 * 3;
 
   uint3 indices = LoadTriangleIndices(indexBufferOffset);
-  float3 triangleNormals[3] = {
+  float3 normals[3] = {
     LoadNormal(indices.x), LoadNormal(indices.y), LoadNormal(indices.z)
   };
 
-  float3 normal = normalize(InterpolateVertexAttr(triangleNormals, attr));
+  float3 normal = normalize(InterpolateVertexAttr(normals, attr));
   normal = normalize(mul(float3x3(s_matrixBuffer.Transform[0].xyz,
                                   s_matrixBuffer.Transform[1].xyz,
                                   s_matrixBuffer.Transform[2].xyz), normal));
@@ -103,10 +100,10 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float3 lightPos = float3(0.f, 1.9f, 0.f);
   float3 lightDir = normalize(lightPos - hitPos);
 
-  float3 ambient = float3(1.f, 1.f, 1.f);
-  float3 diffuse = clamp(dot(lightDir, normal), 0.0, 1.0) * float3(1.f, 1.f, 1.f);
+  float3 diffuse =
+      clamp(dot(lightDir, normal), 0.0, 1.0) * s_material.Roughness.BaseColorFactor.rgb;
 
-  payload.Color = float4(0.1f * ambient + diffuse, 1.f);
+  payload.Color = float4(diffuse, 1.f);
 }
 
 [shader("miss")]

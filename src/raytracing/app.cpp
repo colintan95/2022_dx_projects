@@ -5,10 +5,10 @@
 
 #include <vector>
 
-#include <utils/gltf_loader.h>
 #include <utils/memory.h>
 
-#include "gen/shader.h"
+#include "shader.h"
+#include "gen/shader_src.h"
 
 using namespace DirectX;
 
@@ -32,6 +32,8 @@ App::App(HWND hwnd) : m_hwnd(hwnd) {
   CreateDevice();
   CreateCommandQueueAndSwapChain();
   CreateCommandListAndFence();
+
+  LoadModel();
 
   CreatePipeline();
   CreateDescriptorHeap();
@@ -119,6 +121,10 @@ void App::CreateCommandListAndFence() {
   check_bool(m_fenceEvent.is_valid());
 }
 
+void App::LoadModel() {
+  m_model = utils::LoadGltf("assets/cornell_box.gltf");
+}
+
 void App::CreatePipeline() {
   // Global root signature
   {
@@ -144,11 +150,12 @@ void App::CreatePipeline() {
 
   // Closest hit root signature
   {
-    CD3DX12_ROOT_PARAMETER1 rootParams[4] = {};
+    CD3DX12_ROOT_PARAMETER1 rootParams[5] = {};
     rootParams[0].InitAsShaderResourceView(1);
     rootParams[1].InitAsShaderResourceView(2);
     rootParams[2].InitAsConstantBufferView(0);
-    rootParams[3].InitAsConstants(1, 1);
+    rootParams[3].InitAsConstantBufferView(1);
+    rootParams[4].InitAsConstants(1, 2);
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSigDesc;
     rootSigDesc.Init_1_1(_countof(rootParams), rootParams, 0, nullptr,
@@ -167,8 +174,8 @@ void App::CreatePipeline() {
 
   auto* dxilLib = pipelineDesc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
 
-  auto shaderSrc = CD3DX12_SHADER_BYTECODE(reinterpret_cast<const void*>(g_shader),
-                                           sizeof(g_shader));
+  auto shaderSrc = CD3DX12_SHADER_BYTECODE(reinterpret_cast<const void*>(g_shaderSrc),
+                                           sizeof(g_shaderSrc));
   dxilLib->SetDXILLibrary(&shaderSrc);
 
   const wchar_t* shaderNames[] = { k_rayGenShaderName, k_closestHitShaderName, k_missShaderName };
@@ -247,33 +254,62 @@ void App::CreateConstantBuffers() {
   // Flip the z axis since gltf uses right-handed coordinates.
   worldMat.m[2][2] *= -1.f;
 
-  size_t bufferSize = utils::GetAlignedSize(sizeof(DirectX::XMFLOAT3X4),
-                                            D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+  {
+    size_t bufferSize = utils::GetAlignedSize(sizeof(DirectX::XMFLOAT3X4),
+                                              D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
 
-  CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-  CD3DX12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+    CD3DX12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
 
-  check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc,
-                                                  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                  IID_PPV_ARGS(m_matrixBuffer.put())));
+    check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc,
+                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                    IID_PPV_ARGS(m_matrixBuffer.put())));
 
-  XMFLOAT3X4* ptr;
-  check_hresult(m_matrixBuffer->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
+    XMFLOAT3X4* ptr;
+    check_hresult(m_matrixBuffer->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
 
-  *ptr = worldMat;
+    *ptr = worldMat;
 
-  m_matrixBuffer->Unmap(0, nullptr);
+    m_matrixBuffer->Unmap(0, nullptr);
+  }
+
+  {
+    size_t bufferSize = utils::GetAlignedSize(sizeof(Material) * m_model.Materials.size(),
+                                              D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+
+    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+    CD3DX12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+    check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc,
+                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                    IID_PPV_ARGS(m_materialsBuffer.put())));
+
+    Material* ptr;
+    check_hresult(m_materialsBuffer->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
+
+    for (utils::Material& material : m_model.Materials) {
+      ptr->Roughness.BaseColorFactor.x = material.PbrMetallicRoughness.BaseColorFactor[0];
+      ptr->Roughness.BaseColorFactor.y = material.PbrMetallicRoughness.BaseColorFactor[1];
+      ptr->Roughness.BaseColorFactor.z = material.PbrMetallicRoughness.BaseColorFactor[2];
+      ptr->Roughness.BaseColorFactor.w = material.PbrMetallicRoughness.BaseColorFactor[3];
+
+      ptr->Roughness.MetallicFactor = material.PbrMetallicRoughness.MetallicFactor;
+      ptr->Roughness.RoughnessFactor = material.PbrMetallicRoughness.RoughnessFactor;
+
+      ++ptr;
+    }
+
+    m_materialsBuffer->Unmap(0, nullptr);
+  }
 }
 
 void App::CreateModelBuffers() {
-  utils::Scene scene = utils::LoadGltf("assets/cornell_box.gltf");
-
   check_hresult(m_cmdAlloc->Reset());
   check_hresult(m_cmdList->Reset(m_cmdAlloc.get(), nullptr));
 
   std::vector<com_ptr<ID3D12Resource>> uploadBuffers;
 
-  for (auto& bufferData : scene.Buffers) {
+  for (auto& bufferData : m_model.Buffers) {
     com_ptr<ID3D12Resource> buffer;
     com_ptr<ID3D12Resource> uploadBuffer;
 
@@ -290,38 +326,6 @@ void App::CreateModelBuffers() {
   m_cmdQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
 
   WaitForGpu();
-
-  for (auto& meshData : scene.Meshes) {
-    for (auto& primData : meshData.Primitives) {
-      utils::BufferView* posBufferView = primData.Positions->BufferView;
-      utils::BufferView* normalBufferView = primData.Normals->BufferView;
-      utils::BufferView* indexBufferView = primData.Indices->BufferView;
-
-      ID3D12Resource* posBuffer = m_modelBuffers[posBufferView->BufferIndex].get();
-      ID3D12Resource* normalBuffer = m_modelBuffers[normalBufferView->BufferIndex].get();
-      ID3D12Resource* indexBuffer = m_modelBuffers[indexBufferView->BufferIndex].get();
-
-      D3D12_RAYTRACING_GEOMETRY_DESC geometryDesc{};
-      geometryDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-      geometryDesc.Triangles.Transform3x4 = m_matrixBuffer->GetGPUVirtualAddress();
-      geometryDesc.Triangles.VertexBuffer.StartAddress = posBuffer->GetGPUVirtualAddress() +
-                                                         posBufferView->Offset;
-      geometryDesc.Triangles.VertexBuffer.StrideInBytes = *posBufferView->Stride;
-      geometryDesc.Triangles.VertexCount = primData.Positions->Count;
-      geometryDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-      geometryDesc.Triangles.IndexBuffer = indexBuffer->GetGPUVirtualAddress() +
-                                           indexBufferView->Offset;
-      geometryDesc.Triangles.IndexCount = primData.Indices->Count;
-      geometryDesc.Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
-      geometryDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-
-      m_geometryDescs.push_back(geometryDesc);
-
-      m_normalBuffers.push_back(normalBuffer->GetGPUVirtualAddress() + normalBufferView->Offset);
-      m_indexBuffers.push_back(indexBuffer->GetGPUVirtualAddress() + indexBufferView->Offset);
-      m_normalBufferStrides.push_back(*normalBufferView->Stride);
-    }
-  }
 }
 
 // Disable padding alignment warning.
@@ -337,8 +341,8 @@ struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) HitGroupShaderReco
   alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS NormalBuffer;
   alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS IndexBuffer;
   alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS MatrixBuffer;
-  alignas(uint32_t) uint32_t NormalBufferStride;
-
+  alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS Material;
+  alignas(sizeof(ClosestHitConstants)) ClosestHitConstants Constants;
 };
 
 struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) MissShaderRecord {
@@ -371,11 +375,16 @@ void App::CreateShaderTables() {
   }
 
   {
+    size_t numPrims = 0;
+    for (auto& meshData : m_model.Meshes) {
+      numPrims += meshData.Primitives.size();
+    }
+
     m_hitGroupShaderRecordSize = sizeof(HitGroupShaderRecord);
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
     CD3DX12_RESOURCE_DESC bufferDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(m_hitGroupShaderRecordSize * m_geometryDescs.size());
+        CD3DX12_RESOURCE_DESC::Buffer(m_hitGroupShaderRecordSize * numPrims);
 
     check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE,
                                                     &bufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
@@ -387,13 +396,24 @@ void App::CreateShaderTables() {
     HitGroupShaderRecord* ptr;
     check_hresult(m_hitGroupShaderTable->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
 
-    for (int i = 0; i < m_geometryDescs.size(); ++i) {
-      memcpy(ptr->ShaderId, shaderId, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-      ptr->NormalBuffer = m_normalBuffers[i];
-      ptr->IndexBuffer = m_indexBuffers[i];
-      ptr->MatrixBuffer = m_matrixBuffer->GetGPUVirtualAddress();
-      ptr->NormalBufferStride = m_normalBufferStrides[i];
-      ++ptr;
+    for (auto& meshData : m_model.Meshes) {
+      for (auto& primData : meshData.Primitives) {
+        utils::BufferView* normalBufferView = primData.Normals->BufferView;
+        utils::BufferView* indexBufferView = primData.Indices->BufferView;
+
+        ID3D12Resource* normalBuffer = m_modelBuffers[normalBufferView->BufferIndex].get();
+        ID3D12Resource* indexBuffer = m_modelBuffers[indexBufferView->BufferIndex].get();
+
+        memcpy(ptr->ShaderId, shaderId, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+        ptr->NormalBuffer = normalBuffer->GetGPUVirtualAddress() + normalBufferView->Offset;
+        ptr->IndexBuffer = indexBuffer->GetGPUVirtualAddress() + indexBufferView->Offset;
+        ptr->MatrixBuffer = m_matrixBuffer->GetGPUVirtualAddress();
+        ptr->Material = m_materialsBuffer->GetGPUVirtualAddress() +
+                        primData.MaterialIndex * sizeof(Material);
+        ptr->Constants.NormalBufferStride = *normalBufferView->Stride;
+
+        ++ptr;
+      }
     }
 
     m_hitGroupShaderTable->Unmap(0, nullptr);
@@ -422,6 +442,34 @@ void App::CreateShaderTables() {
 }
 
 void App::CreateAccelerationStructures() {
+  std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geometryDescs;
+
+  for (auto& meshData : m_model.Meshes) {
+    for (auto& primData : meshData.Primitives) {
+      utils::BufferView* posBufferView = primData.Positions->BufferView;
+      utils::BufferView* indexBufferView = primData.Indices->BufferView;
+
+      ID3D12Resource* posBuffer = m_modelBuffers[posBufferView->BufferIndex].get();
+      ID3D12Resource* indexBuffer = m_modelBuffers[indexBufferView->BufferIndex].get();
+
+      D3D12_RAYTRACING_GEOMETRY_DESC geometryDesc{};
+      geometryDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+      geometryDesc.Triangles.Transform3x4 = m_matrixBuffer->GetGPUVirtualAddress();
+      geometryDesc.Triangles.VertexBuffer.StartAddress = posBuffer->GetGPUVirtualAddress() +
+                                                         posBufferView->Offset;
+      geometryDesc.Triangles.VertexBuffer.StrideInBytes = *posBufferView->Stride;
+      geometryDesc.Triangles.VertexCount = primData.Positions->Count;
+      geometryDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+      geometryDesc.Triangles.IndexBuffer = indexBuffer->GetGPUVirtualAddress() +
+                                           indexBufferView->Offset;
+      geometryDesc.Triangles.IndexCount = primData.Indices->Count;
+      geometryDesc.Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
+      geometryDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+      geometryDescs.push_back(geometryDesc);
+    }
+  }
+
   D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInputs{};
   tlasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
   tlasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
@@ -435,8 +483,8 @@ void App::CreateAccelerationStructures() {
   blasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
   blasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
   blasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-  blasInputs.NumDescs = static_cast<uint32_t>(m_geometryDescs.size());
-  blasInputs.pGeometryDescs = m_geometryDescs.data();
+  blasInputs.NumDescs = static_cast<uint32_t>(geometryDescs.size());
+  blasInputs.pGeometryDescs = geometryDescs.data();
 
   D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo{};
   m_device->GetRaytracingAccelerationStructurePrebuildInfo(&blasInputs, &blasPrebuildInfo);

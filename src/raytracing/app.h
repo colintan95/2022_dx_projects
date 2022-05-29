@@ -8,6 +8,10 @@
 
 #include <vector>
 
+#include <utils/gltf_loader.h>
+
+#include "shader.h"
+
 inline constexpr int k_numFrames = 3;
 
 class App {
@@ -21,6 +25,8 @@ private:
   void CreateDevice();
   void CreateCommandQueueAndSwapChain();
   void CreateCommandListAndFence();
+
+  void LoadModel();
 
   void CreatePipeline();
   void CreateDescriptorHeap();
@@ -51,6 +57,8 @@ private:
   winrt::com_ptr<ID3D12CommandAllocator> m_cmdAlloc;
   winrt::com_ptr<ID3D12GraphicsCommandList4> m_cmdList;
 
+  utils::Scene m_model;
+
   winrt::com_ptr<ID3D12RootSignature> m_globalRootSig;
   winrt::com_ptr<ID3D12RootSignature> m_closestHitRootSig;
 
@@ -72,13 +80,9 @@ private:
   winrt::com_ptr<ID3D12Resource> m_film;
 
   winrt::com_ptr<ID3D12Resource> m_matrixBuffer;
+  winrt::com_ptr<ID3D12Resource> m_materialsBuffer;
 
   std::vector<winrt::com_ptr<ID3D12Resource>> m_modelBuffers;
-  std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> m_geometryDescs;
-
-  std::vector<D3D12_GPU_VIRTUAL_ADDRESS> m_normalBuffers;
-  std::vector<D3D12_GPU_VIRTUAL_ADDRESS> m_indexBuffers;
-  std::vector<uint32_t> m_normalBufferStrides;
 
   winrt::com_ptr<ID3D12Resource> m_blas;
   winrt::com_ptr<ID3D12Resource> m_tlas;

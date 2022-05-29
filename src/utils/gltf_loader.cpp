@@ -110,6 +110,25 @@ Scene LoadGltf(const char* path) {
     scene.Accessors.push_back(accessor);
   }
 
+  if (gltfJson.contains("materials")) {
+    for (auto& materialJson : gltfJson["materials"]) {
+      json& roughnessJson = materialJson["pbrMetallicRoughness"];
+
+      PbrMetallicRoughness roughness{};
+      roughness.BaseColorFactor[0] = roughnessJson["baseColorFactor"][0];
+      roughness.BaseColorFactor[1] = roughnessJson["baseColorFactor"][1];
+      roughness.BaseColorFactor[2] = roughnessJson["baseColorFactor"][2];
+      roughness.BaseColorFactor[3] = roughnessJson["baseColorFactor"][3];
+      roughness.MetallicFactor = roughnessJson["metallicFactor"];
+      roughness.RoughnessFactor = roughnessJson["roughnessFactor"];
+
+      Material material{};
+      material.PbrMetallicRoughness = roughness;
+
+      scene.Materials.push_back(material);
+    }
+  }
+
   for (auto& meshJson : gltfJson["meshes"]) {
     Mesh mesh{};
 
@@ -123,6 +142,10 @@ Scene LoadGltf(const char* path) {
       prim.Positions = &scene.Accessors[positionsIndex];
       prim.Normals = &scene.Accessors[normalsIndex];
       prim.Indices = &scene.Accessors[indicesIndex];
+
+      if (primJson.contains("material")) {
+        prim.MaterialIndex = primJson["material"];
+      }
 
       mesh.Primitives.push_back(std::move(prim));
     }

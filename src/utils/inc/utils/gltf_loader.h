@@ -31,10 +31,21 @@ struct Accessor {
   AccessorType Type;
 };
 
+struct PbrMetallicRoughness {
+  float BaseColorFactor[4];
+  float MetallicFactor;
+  float RoughnessFactor;
+};
+
+struct Material {
+  PbrMetallicRoughness PbrMetallicRoughness;
+};
+
 struct Primitive {
   Accessor* Positions;
   Accessor* Normals;
   Accessor* Indices;
+  int MaterialIndex;
 };
 
 struct Mesh {
@@ -45,6 +56,7 @@ struct Scene {
   std::vector<std::vector<uint8_t>> Buffers;
   std::vector<BufferView> BufferViews;
   std::vector<Accessor> Accessors;
+  std::vector<Material> Materials;
 
   std::vector<Mesh> Meshes;
 };
