@@ -8,16 +8,21 @@
 
 #include <vector>
 
+#include <utils/camera.h>
+#include <utils/window.h>
+
 inline constexpr int k_numFrames = 3;
 
 class App {
 public:
-  App(HWND hwnd);
+  App(utils::Window* window);
   ~App();
 
   void RenderFrame();
 
 private:
+  void AddCameraListeners();
+
   void CreateDevice();
   void CreateCommandQueueAndSwapChain();
   void CreateCommandListAndFence();
@@ -29,12 +34,15 @@ private:
   void CreateVertexBuffers();
   void CreateConstantBuffer();
 
+  void UpdateMatrices();
+
   void MoveToNextFrame();
   void WaitForGpu();
 
-  HWND m_hwnd;
-  int m_windowWidth = 0;
-  int m_windowHeight = 0;
+  utils::Window* m_window;
+  utils::Camera m_camera;
+
+  std::vector<utils::ListenerHandle> m_listenerHandles;
 
   winrt::com_ptr<IDXGIFactory6> m_factory;
   winrt::com_ptr<ID3D12Device> m_device;
@@ -74,11 +82,11 @@ private:
   };
   std::vector<Primitive> m_primitives;
 
-  struct MatrixBuffer {
+  struct Matrices {
     DirectX::XMFLOAT4X4 WorldMat;
     DirectX::XMFLOAT4X4 WorldViewProjMat;
   };
-  MatrixBuffer m_matrixBuffer;
+  Matrices m_matrices;
 
   winrt::com_ptr<ID3D12Resource> m_constantBuffer;
 

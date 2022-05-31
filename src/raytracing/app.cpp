@@ -10,6 +10,8 @@
 #include "shader.h"
 #include "gen/shader_src.h"
 
+#include <iostream>
+
 using namespace DirectX;
 
 using winrt::check_bool;
@@ -23,13 +25,7 @@ const wchar_t* k_shadowMissShaderName = L"ShadowMissShader";
 
 const wchar_t* k_hitGroupName = L"HitGroup";
 
-App::App(HWND hwnd) : m_hwnd(hwnd) {
-  RECT windowRect{};
-  check_bool(GetWindowRect(m_hwnd, &windowRect));
-
-  m_windowWidth = windowRect.right - windowRect.left;
-  m_windowHeight = windowRect.bottom - windowRect.top;
-
+App::App(utils::Window* window) : m_window(window) {
   CreateDevice();
   CreateCommandQueueAndSwapChain();
   CreateCommandListAndFence();
@@ -84,16 +80,17 @@ void App::CreateCommandQueueAndSwapChain() {
 
   DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
   swapChainDesc.BufferCount = k_numFrames;
-  swapChainDesc.Width = m_windowWidth;
-  swapChainDesc.Height = m_windowHeight;
+  swapChainDesc.Width = m_window->GetWidth();
+  swapChainDesc.Height = m_window->GetHeight();
   swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
   swapChainDesc.BufferUsage = DXGI_USAGE_BACK_BUFFER;
   swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
   swapChainDesc.SampleDesc.Count = 1;
 
   winrt::com_ptr<IDXGISwapChain1> swapChain;
-  check_hresult(m_factory->CreateSwapChainForHwnd(m_cmdQueue.get(), m_hwnd, &swapChainDesc, nullptr,
-                                                  nullptr, swapChain.put()));
+  check_hresult(m_factory->CreateSwapChainForHwnd(m_cmdQueue.get(), m_window->GetHwnd(),
+                                                  &swapChainDesc, nullptr, nullptr,
+                                                  swapChain.put()));
   swapChain.as(m_swapChain);
 
   for (int i = 0; i < k_numFrames; ++i) {
@@ -238,8 +235,9 @@ void App::CreateDescriptorHeap() {
 void App::CreateResources() {
   CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
   CD3DX12_RESOURCE_DESC bufferDesc =
-      CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, m_windowWidth, m_windowHeight, 1, 1,
-                                   1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+      CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, m_window->GetWidth(),
+                                   m_window->GetHeight(), 1, 1, 1, 0,
+                                   D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 
   check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
                                                   D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
@@ -640,8 +638,8 @@ void App::RenderFrame() {
   dispatchDesc.MissShaderTable.SizeInBytes = m_missShaderTable->GetDesc().Width;
   dispatchDesc.MissShaderTable.StrideInBytes = m_missShaderRecordStride;
 
-  dispatchDesc.Width = m_windowWidth;
-  dispatchDesc.Height = m_windowHeight;
+  dispatchDesc.Width = m_window->GetWidth();
+  dispatchDesc.Height = m_window->GetHeight();
   dispatchDesc.Depth = 1;
 
   m_cmdList->SetPipelineState1(m_pipeline.get());

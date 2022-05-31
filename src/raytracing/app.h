@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <utils/gltf_loader.h>
+#include <utils/window.h>
 
 #include "shader.h"
 
@@ -16,7 +17,7 @@ inline constexpr int k_numFrames = 3;
 
 class App {
 public:
-  App(HWND hwnd);
+  App(utils::Window* window);
   ~App();
 
   void RenderFrame();
@@ -41,9 +42,7 @@ private:
   void MoveToNextFrame();
   void WaitForGpu();
 
-  HWND m_hwnd;
-  int m_windowWidth = 0;
-  int m_windowHeight = 0;
+  utils::Window* m_window;
 
   winrt::com_ptr<IDXGIFactory6> m_factory;
   winrt::com_ptr<ID3D12Device5> m_device;

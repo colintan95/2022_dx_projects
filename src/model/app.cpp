@@ -15,12 +15,9 @@ using winrt::check_bool;
 using winrt::check_hresult;
 using winrt::com_ptr;
 
-App::App(HWND hwnd) : m_hwnd(hwnd) {
-  RECT windowRect{};
-  check_bool(GetWindowRect(m_hwnd, &windowRect));
-
-  m_windowWidth = windowRect.right - windowRect.left;
-  m_windowHeight = windowRect.bottom - windowRect.top;
+App::App(utils::Window* window)
+  : m_window(window), m_camera(0.f, 2.2f, -6.f, 0.f, XM_PI / 8.f, 0.f) {
+  AddCameraListeners();
 
   CreateDevice();
   CreateCommandQueueAndSwapChain();
@@ -32,6 +29,44 @@ App::App(HWND hwnd) : m_hwnd(hwnd) {
   CreateDepthTexture();
   CreateVertexBuffers();
   CreateConstantBuffer();
+}
+
+void App::AddCameraListeners() {
+  m_listenerHandles.push_back(
+      m_window->AddKeyPressListener(
+          'C',
+          [this]{ m_camera.ToggleEnabled(); }));
+
+  m_listenerHandles.push_back(
+      m_window->AddMouseMoveListener(
+          [this](int mouseX, int mouseY) {
+            if (m_camera.IsEnabled())
+              m_camera.UpdateMousePosition(mouseX, mouseY);
+          }));
+
+  m_listenerHandles.push_back(
+      m_window->AddKeyPressListener(
+          'W',
+          [this]{ m_camera.MoveForward(true); },
+          [this]{ m_camera.MoveForward(false); }));
+
+  m_listenerHandles.push_back(
+      m_window->AddKeyPressListener(
+          'S',
+          [this]{ m_camera.MoveBackward(true); },
+          [this]{ m_camera.MoveBackward(false); }));
+
+  m_listenerHandles.push_back(
+      m_window->AddKeyPressListener(
+          'A',
+          [this]{ m_camera.MoveLeft(true); },
+          [this]{ m_camera.MoveLeft(false); }));
+
+  m_listenerHandles.push_back(
+      m_window->AddKeyPressListener(
+          'D',
+          [this]{ m_camera.MoveRight(true); },
+          [this]{ m_camera.MoveRight(false); }));
 }
 
 void App::CreateDevice() {
@@ -71,25 +106,26 @@ void App::CreateCommandQueueAndSwapChain() {
 
   DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
   swapChainDesc.BufferCount = k_numFrames;
-  swapChainDesc.Width = m_windowWidth;
-  swapChainDesc.Height = m_windowHeight;
+  swapChainDesc.Width = m_window->GetWidth();
+  swapChainDesc.Height = m_window->GetHeight();
   swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
   swapChainDesc.BufferUsage = DXGI_USAGE_BACK_BUFFER;
   swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
   swapChainDesc.SampleDesc.Count = 1;
 
   winrt::com_ptr<IDXGISwapChain1> swapChain;
-  check_hresult(m_factory->CreateSwapChainForHwnd(m_cmdQueue.get(), m_hwnd, &swapChainDesc, nullptr,
-                                                  nullptr, swapChain.put()));
+  check_hresult(m_factory->CreateSwapChainForHwnd(m_cmdQueue.get(), m_window->GetHwnd(),
+                                                  &swapChainDesc, nullptr, nullptr,
+                                                  swapChain.put()));
   swapChain.as(m_swapChain);
 
   for (int i = 0; i < k_numFrames; ++i) {
     check_hresult(m_swapChain->GetBuffer(i, IID_PPV_ARGS(&m_frames[i].SwapChainBuffer)));
   }
 
-  m_viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<float>(m_windowWidth),
-                                static_cast<float>(m_windowHeight));
-  m_scissorRect = CD3DX12_RECT(0, 0, m_windowWidth, m_windowHeight);
+  m_viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<float>(m_window->GetWidth()),
+                                static_cast<float>(m_window->GetHeight()));
+  m_scissorRect = CD3DX12_RECT(0, 0, m_window->GetWidth(), m_window->GetHeight());
 }
 
 void App::CreateCommandListAndFence() {
@@ -196,7 +232,8 @@ void App::CreateDescriptorHeaps() {
 void App::CreateDepthTexture() {
   CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
   CD3DX12_RESOURCE_DESC textureDesc =
-      CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, m_windowWidth, m_windowHeight, 1, 0, 1, 0,
+      CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, m_window->GetWidth(),
+                                   m_window->GetHeight(), 1, 0, 1, 0,
                                    D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL |
                                    D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
   CD3DX12_CLEAR_VALUE clearValue(DXGI_FORMAT_D32_FLOAT, 1.f, 0);
@@ -277,26 +314,7 @@ void App::CreateVertexBuffers() {
 }
 
 void App::CreateConstantBuffer() {
-  XMMATRIX worldMat = XMMatrixRotationY(XM_PI / 6.f);
-
-  float cameraRoll = 0.f;
-  float cameraYaw = 0.f;
-  float cameraPitch = XM_PI / 8.f;
-
-  XMMATRIX cameraViewMat =
-      XMMatrixRotationY(-cameraYaw) * XMMatrixRotationX(-cameraPitch) *
-      XMMatrixRotationZ(-cameraRoll);
-
-  XMMATRIX viewMat = XMMatrixTranslation(0.f, -2.2f, 6.f) * cameraViewMat;
-  XMMATRIX projMat = XMMatrixPerspectiveFovLH(
-      XM_PI / 4.f, static_cast<float>(m_windowWidth) / static_cast<float>(m_windowHeight), 0.1f,
-      1000.f);
-
-  XMStoreFloat4x4(&m_matrixBuffer.WorldMat, XMMatrixTranspose(worldMat));
-  XMStoreFloat4x4(&m_matrixBuffer.WorldViewProjMat,
-                  XMMatrixTranspose(worldMat * viewMat * projMat));
-
-  size_t bufferSize = utils::GetAlignedSize(m_matrixBuffer,
+  size_t bufferSize = utils::GetAlignedSize(m_matrices,
                                             D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
 
   CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
@@ -305,13 +323,6 @@ void App::CreateConstantBuffer() {
   check_hresult(m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE,
                                                   &bufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
                                                   nullptr, IID_PPV_ARGS(m_constantBuffer.put())));
-
-  MatrixBuffer* ptr;
-  check_hresult(m_constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
-
-  *ptr = m_matrixBuffer;
-
-  m_constantBuffer->Unmap(0, nullptr);
 }
 
 App::~App() {
@@ -319,6 +330,10 @@ App::~App() {
 }
 
 void App::RenderFrame() {
+  m_camera.Tick(m_window->GetTimeDeltaMs());
+
+  UpdateMatrices();
+
   check_hresult(m_frames[m_currentFrame].CmdAlloc->Reset());
   check_hresult(m_cmdList->Reset(m_frames[m_currentFrame].CmdAlloc.get(), nullptr));
 
@@ -369,6 +384,39 @@ void App::RenderFrame() {
   check_hresult(m_swapChain->Present(1, 0));
 
   MoveToNextFrame();
+}
+
+void App::UpdateMatrices() {
+  XMMATRIX worldMat = XMMatrixRotationY(XM_PI / 6.f);
+
+  float cameraYaw = m_camera.GetYaw();
+  float cameraPitch = m_camera.GetPitch();;
+  float cameraRoll = 0.f;
+
+  XMMATRIX cameraRotateMat =
+      XMMatrixRotationY(-cameraYaw) * XMMatrixRotationX(-cameraPitch) *
+      XMMatrixRotationZ(-cameraRoll);
+
+  float cameraX = m_camera.GetX();
+  float cameraY = m_camera.GetY();
+  float cameraZ = m_camera.GetZ();
+
+  XMMATRIX viewMat = XMMatrixTranslation(-cameraX, -cameraY, -cameraZ) * cameraRotateMat;
+  XMMATRIX projMat = XMMatrixPerspectiveFovLH(
+      XM_PI / 4.f,
+      static_cast<float>(m_window->GetWidth()) / static_cast<float>(m_window->GetHeight()), 0.1f,
+      1000.f);
+
+  XMStoreFloat4x4(&m_matrices.WorldMat, XMMatrixTranspose(worldMat));
+  XMStoreFloat4x4(&m_matrices.WorldViewProjMat,
+                  XMMatrixTranspose(worldMat * viewMat * projMat));
+
+  Matrices* ptr;
+  check_hresult(m_constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
+
+  *ptr = m_matrices;
+
+  m_constantBuffer->Unmap(0, nullptr);
 }
 
 void App::MoveToNextFrame() {
