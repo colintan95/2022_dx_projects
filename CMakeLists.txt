@@ -4,7 +4,7 @@ project(dx_projects)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_compile_options(/W4 /WX)
+add_compile_options(/W4 /WX /await)
 add_compile_definitions(UNICODE)
 
 set(WIL_BUILD_TESTS OFF CACHE BOOL "" FORCE)

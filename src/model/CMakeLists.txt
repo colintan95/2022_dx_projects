@@ -24,7 +24,7 @@ target_link_libraries(model PRIVATE WIL)
 
 target_include_directories(model PRIVATE ${PROJECT_SOURCE_DIR}/external/d3dx12)
 
-target_link_libraries(model PRIVATE d3d12.lib dxgi.lib)
+target_link_libraries(model PRIVATE d3d12.lib dxgi.lib OneCore.lib)
 
 target_link_libraries(model PRIVATE utils)
 

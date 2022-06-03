@@ -13,6 +13,6 @@ target_link_libraries(utils PRIVATE nlohmann_json)
 
 target_include_directories(utils PRIVATE ${PROJECT_SOURCE_DIR}/external/d3dx12)
 
-target_link_libraries(utils PUBLIC d3d12.lib)
+target_link_libraries(utils PUBLIC d3d12.lib OneCore.lib)
 
 target_include_directories(utils PUBLIC inc)

@@ -19,7 +19,7 @@ target_link_libraries(raytracing PRIVATE DirectXMath)
 
 target_include_directories(raytracing PRIVATE ${PROJECT_SOURCE_DIR}/external/d3dx12)
 
-target_link_libraries(raytracing PRIVATE d3d12.lib dxgi.lib)
+target_link_libraries(raytracing PRIVATE d3d12.lib dxgi.lib OneCore.lib)
 
 target_link_libraries(raytracing PRIVATE utils)
 
