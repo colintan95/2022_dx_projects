@@ -21,6 +21,7 @@ ConstantBuffer<ClosestHitConstants> s_closestHitConstants : register(b2);
 
 struct RayPayload {
   float4 Color;
+  uint RngState;
 };
 
 [shader("raygeneration")]
@@ -35,12 +36,14 @@ void RayGenShader() {
   float viewportX = lerp(-1.33f, 1.33f, lerpValues.x);
   float viewportY = lerp(1.f, -1.f, lerpValues.y);
 
+  uint2 pixel = DispatchRaysIndex().xy;
+
   RayDesc ray;
   ray.Origin = float3(0.f, 1.f, -4.f);
   ray.Direction = float3(viewportX * 0.414f, viewportY * 0.414f, 1.f);
   ray.TMin = 0.0;
   ray.TMax = 10000.0;
-  RayPayload payload = { float4(0.f, 0.f, 0.f, 0.f) };
+  RayPayload payload = { float4(0.f, 0.f, 0.f, 0.f), pixel.x + 10000 * pixel.y };
 
   TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
 
@@ -127,6 +130,24 @@ float3 Brdf(float3 Lo, float3 Li, float3 n, float roughness, float metallic, flo
   return diffuse + specular;
 }
 
+// RNG taken from Ch14 of Ray Tracing Gems II.
+
+uint XorShift(inout uint rngState) {
+  rngState ^= (rngState << 13);
+  rngState ^= (rngState >> 17);
+  rngState ^= (rngState << 5);
+
+  return rngState; 
+}
+
+float uintToFloat(uint x) {
+  return asfloat(0x3f800000 | (x >> 9)) - 1.f;
+}
+
+float Rand(inout uint rngState) {
+  return uintToFloat(XorShift(rngState));
+}
+
 [shader("closesthit")]
 void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   // Stride of indices in triangle is index size in bytes * indices per triangle => 2 * 3 = 6.
@@ -144,33 +165,48 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   float3 hitPos = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
 
-  float3 lightPos = float3(0.f, 1.9f, 0.f);
+  float lightPtX1 = -0.24f;
+  float lightPtX2 = 0.23f;
 
-  float3 lightDistVec = lightPos - hitPos;
-  float3 lightDir = normalize(lightDistVec);
+  float lightPtZ1 = -0.22f;
+  float lightPtZ2 = 0.16f;
 
-  RayDesc shadowRay;
-  shadowRay.Origin = hitPos;
-  shadowRay.Direction = lightDir;
-  shadowRay.TMin = 0.0;
-  shadowRay.TMax = length(lightDistVec);
-  ShadowRayPayload shadowPayload = { true };
-
-  TraceRay(s_scene,
-           RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
-           RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, ~0, 0, 1, 1, shadowRay,
-           shadowPayload);
-
-  float isIlluminated = shadowPayload.IsOccluded ? 0.0 : 1.0;
+  uint rngState = payload.RngState;
 
   float3 lightEmissive = float3(1.f, 1.f, 1.f);
-  float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal, 
-                     s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
-                     s_material.Roughness.BaseColorFactor.rgb);
-
   float pdf = 1.f / (2.f * PI);
 
-  payload.Color = float4(isIlluminated * brdf * dot(lightDir, normal) * lightEmissive / pdf, 1.f);
+  float3 accum = 0.f;
+
+  for (int i = 0; i < 10; ++i) {
+    float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.9f, 
+                       lerp(lightPtZ1, lightPtZ2, Rand(rngState))};
+
+    float3 lightDistVec = lightPos - hitPos;
+    float3 lightDir = normalize(lightDistVec);
+    
+    RayDesc shadowRay;
+    shadowRay.Origin = hitPos;
+    shadowRay.Direction = lightDir;
+    shadowRay.TMin = 0.0;
+    shadowRay.TMax = length(lightDistVec);
+    ShadowRayPayload shadowPayload = { true };
+
+    TraceRay(s_scene,
+            RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
+            RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, ~0, 0, 1, 1, shadowRay,
+            shadowPayload);
+
+    float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal, 
+                       s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
+                       s_material.Roughness.BaseColorFactor.rgb);        
+
+    float isIlluminated = shadowPayload.IsOccluded ? 0.0 : 1.0;
+
+    accum += isIlluminated * brdf * dot(lightDir, normal) * lightEmissive / pdf;
+  }
+
+  payload.Color = float4(accum / 10.f, 1.f);
 }
 
 [shader("miss")]
