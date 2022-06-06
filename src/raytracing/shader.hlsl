@@ -137,19 +137,19 @@ float GGX_V(float3 Lo, float3 Li, float3 n, float alpha) {
   return 0.f;
 }
 
-float3 Brdf(float3 Lo, float3 Li, float3 n, float roughness, float metallic, float3 baseColor) {
-  float3 h = normalize(Lo + Li);
+float3 Brdf(float3 Vo, float3 Vi, float3 n, float roughness, float metallic, float3 baseColor) {
+  float3 h = normalize(Vo + Vi);
   
   float3 black = 0.f;
-  float3 f0 = 0.04f;
+  float3 f0 = lerp(0.04f, baseColor, metallic);
   float alpha = pow(roughness, 2);
 
-  float3 fresnel = f0 + (1.f - f0) * pow((1 - abs(dot(Lo, h))), 5);
+  float3 fresnel = f0 + (1.f - f0) * pow((1.f - abs(dot(Vo, h))), 5);
   
   float3 cDiff = lerp(baseColor, black, metallic);
 
   float3 diffuse = (1.f - fresnel) * (1.f / PI) * cDiff;
-  float3 specular = fresnel * GGX_D(n, h, alpha) * GGX_V(Lo, Li, n, alpha);
+  float3 specular = fresnel * GGX_D(n, h, alpha) * GGX_V(Vo, Vi, n, alpha);
 
   return diffuse + specular;
 }
@@ -226,18 +226,13 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   float3 hitPos = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
 
-  float lightPtX1 = -0.24f;
-  float lightPtX2 = 0.23f;
-
-  float lightPtZ1 = -0.22f;
-  float lightPtZ2 = 0.16f;
-
   uint rngState = payload.RngState;
 
-  float3 lightEmissive = float3(1.f, 1.f, 1.f);
-  float pdf = 1.f / (2.f * PI);
+  float3 lightEmissive = 10.f;
 
-  if (payload.RecursionDepth < 2) {
+  payload.Color = float4(0.f, 0.f, 0.f, 1.f);
+
+  if (payload.RecursionDepth < 1) {
     float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
 
     float3 nx = 0.f;
@@ -246,6 +241,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
     GetCoordinateSystem(normal, nx, nz);
 
     float3 rayDir = normalize(dirSample.x * nx + dirSample.y * normal + dirSample.z * nz);
+    float pdf = dot(rayDir, normal) / PI;
 
     RayDesc ray;
     ray.Origin = hitPos;
@@ -263,35 +259,50 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
                        s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
                        s_material.Roughness.BaseColorFactor.rgb);        
 
-    payload.Color = float4(brdf * dot(rayDir, normal) * Li / pdf, 1.f);
-
-  } else {
-    float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.9f, 
-                       lerp(lightPtZ1, lightPtZ2, Rand(rngState))};
-
-    float3 lightDistVec = lightPos - hitPos;
-    float3 lightDir = normalize(lightDistVec);
-    
-    RayDesc shadowRay;
-    shadowRay.Origin = hitPos;
-    shadowRay.Direction = lightDir;
-    shadowRay.TMin = 0.0;
-    shadowRay.TMax = length(lightDistVec);
-    ShadowRayPayload shadowPayload = { true };
-
-    TraceRay(s_scene,
-            RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
-            RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, ~0, 0, 1, 1, shadowRay,
-            shadowPayload);
-
-    float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal, 
-                      s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
-                      s_material.Roughness.BaseColorFactor.rgb);        
-
-    float isIlluminated = shadowPayload.IsOccluded ? 0.0 : 1.0;
-
-    payload.Color = float4(isIlluminated * brdf * dot(lightDir, normal) * lightEmissive / pdf, 1.f);
+    payload.Color.rgb += brdf * dot(rayDir, normal) * Li / pdf;
   }
+
+  float lightPtX1 = -0.24f;
+  float lightPtX2 = 0.23f;
+
+  float lightPtZ1 = -0.22f;
+  float lightPtZ2 = 0.16f;
+
+  float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.95f, 
+                      lerp(lightPtZ1, lightPtZ2, Rand(rngState))};
+
+  float3 lightDistVec = lightPos - hitPos;
+  float3 lightDir = normalize(lightDistVec);
+  
+  RayDesc shadowRay;
+  shadowRay.Origin = hitPos;
+  shadowRay.Direction = lightDir;
+  shadowRay.TMin = 0.0;
+  shadowRay.TMax = length(lightDistVec);
+  ShadowRayPayload shadowPayload = { true };
+
+  TraceRay(s_scene,
+          RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
+          RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, ~0, 0, 1, 1, shadowRay,
+          shadowPayload);
+
+  float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal, 
+                     s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
+                     s_material.Roughness.BaseColorFactor.rgb);        
+
+  float isIlluminated = shadowPayload.IsOccluded ? 0.0 : 1.0;
+
+  float3 lightNormal = {0.f, -1.f, 0.f};
+
+  float3 wi = normalize(hitPos - lightPos);
+  float distSq = pow(distance(hitPos, lightPos), 2);
+
+  float lightArea = (lightPtX2 - lightPtX1) * (lightPtZ2 - lightPtZ1);
+  lightArea = 1.f;
+
+  float pdf = distSq / (abs(dot(lightNormal, -wi)) * lightArea);
+
+  payload.Color.rgb += isIlluminated * brdf * dot(lightDir, normal) * lightEmissive / pdf;
 }
 
 [shader("miss")]
