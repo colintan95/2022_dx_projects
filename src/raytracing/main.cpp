@@ -40,14 +40,14 @@ int WINAPI WinMain(HINSTANCE hinstance, HINSTANCE, LPSTR, int cmdShow) {
 
   App app(s_window);
 
+  app.RenderFrame();
+
   MSG msg = {};
   while (msg.message != WM_QUIT) {
     if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
     }
-
-    app.RenderFrame();
   }
 
   delete s_window;

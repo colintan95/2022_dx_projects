@@ -182,7 +182,7 @@ void App::CreatePipeline() {
   dxilLib->DefineExports(shaderNames);
 
   auto* shaderConfig = pipelineDesc.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-  uint32_t payloadSize = sizeof(float) * 4 + sizeof(uint32_t);
+  uint32_t payloadSize = sizeof(float) * 4 + sizeof(uint32_t) * 2;
   uint32_t attributesSize = sizeof(float) * 2;
   shaderConfig->Config(payloadSize, attributesSize);
 
@@ -208,7 +208,7 @@ void App::CreatePipeline() {
 
   auto* pipelineConfig =
       pipelineDesc.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
-  uint32_t maxRecursionDepth = 2;
+  uint32_t maxRecursionDepth = 3;
   pipelineConfig->Config(maxRecursionDepth);
 
   check_hresult(m_device->CreateStateObject(pipelineDesc, IID_PPV_ARGS(m_pipeline.put())));
