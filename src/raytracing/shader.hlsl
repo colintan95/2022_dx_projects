@@ -84,6 +84,49 @@ struct ShadowRayPayload {
   bool IsOccluded;
 };
 
+static const float PI = 3.14159265f;
+
+float GGX_D(float3 n, float3 h, float alpha) {
+  float alphaSq = alpha * alpha;
+  float nDotH = dot(n, h);
+
+  float f = (nDotH * nDotH) * (alphaSq - 1.f) + 1.f;
+
+  return alphaSq / (PI * f * f);
+}
+
+float GGX_V(float3 Lo, float3 Li, float3 n, float alpha) {
+  float alphaSq = alpha * alpha;
+  float nDotLo = dot(n, Lo);
+  float nDotLi = dot(n, Li);
+
+  float denom1 = nDotLo * sqrt(nDotLi * nDotLi * (1.f - alphaSq) + alphaSq);
+  float denom2 = nDotLi * sqrt(nDotLo * nDotLo * (1.f - alphaSq) + alphaSq);
+
+  float denom = denom1 + denom2;
+  if (denom > 0.0)
+    return 0.5f / denom;
+
+  return 0.f;
+}
+
+float3 Brdf(float3 Lo, float3 Li, float3 n, float roughness, float metallic, float3 baseColor) {
+  float3 h = normalize(Lo + Li);
+  
+  float3 black = 0.f;
+  float3 f0 = 0.04f;
+  float alpha = pow(roughness, 2);
+
+  float3 fresnel = f0 + (1.f - f0) * pow((1 - abs(dot(Lo, h))), 5);
+  
+  float3 cDiff = lerp(baseColor, black, metallic);
+
+  float3 diffuse = (1.f - fresnel) * (1.f / PI) * cDiff;
+  float3 specular = fresnel * GGX_D(n, h, alpha) * GGX_V(Lo, Li, n, alpha);
+
+  return diffuse + specular;
+}
+
 [shader("closesthit")]
 void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   // Stride of indices in triangle is index size in bytes * indices per triangle => 2 * 3 = 6.
@@ -106,9 +149,6 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float3 lightDistVec = lightPos - hitPos;
   float3 lightDir = normalize(lightDistVec);
 
-  float3 diffuse =
-      clamp(dot(lightDir, normal), 0.0, 1.0) * s_material.Roughness.BaseColorFactor.rgb;
-
   RayDesc shadowRay;
   shadowRay.Origin = hitPos;
   shadowRay.Direction = lightDir;
@@ -123,7 +163,14 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   float isIlluminated = shadowPayload.IsOccluded ? 0.0 : 1.0;
 
-  payload.Color = float4(isIlluminated * diffuse, 1.f);
+  float3 lightEmissive = float3(1.f, 1.f, 1.f);
+  float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal, 
+                     s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
+                     s_material.Roughness.BaseColorFactor.rgb);
+
+  float pdf = 1.f / (2.f * PI);
+
+  payload.Color = float4(isIlluminated * brdf * dot(lightDir, normal) * lightEmissive / pdf, 1.f);
 }
 
 [shader("miss")]
