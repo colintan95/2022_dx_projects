@@ -268,7 +268,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float lightPtZ1 = -0.22f;
   float lightPtZ2 = 0.16f;
 
-  float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.95f, 
+  float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.98f, 
                       lerp(lightPtZ1, lightPtZ2, Rand(rngState))};
 
   float3 lightDistVec = lightPos - hitPos;

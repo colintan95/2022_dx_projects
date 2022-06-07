@@ -202,14 +202,6 @@
                     },
                     "indices" : 16,
                     "material" : 6
-                },
-                {
-                    "attributes" : {
-                        "POSITION" : 17,
-                        "NORMAL" : 18
-                    },
-                    "indices" : 2,
-                    "material" : 7
                 }
             ]
         }
