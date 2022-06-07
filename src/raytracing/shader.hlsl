@@ -20,9 +20,10 @@ ConstantBuffer<ClosestHitConstants> s_closestHitConstants : register(b2);
 // ConstantBuffer<RayGenConstantBuffer> s_rayGenConstants : register(b0);
 
 struct RayPayload {
-  float4 Color;
+  float3 Color;
+  float3 Throughput;
+  uint Bounces;
   uint RngState;
-  uint RecursionDepth;
 };
 
 uint JenkinsHash(uint x) {
@@ -64,11 +65,16 @@ void RayGenShader() {
     ray.Direction = float3(viewportX * 0.414f, viewportY * 0.414f, 1.f);
     ray.TMin = 0.0;
     ray.TMax = 10000.0;
-    RayPayload payload = { float4(0.f, 0.f, 0.f, 0.f), InitRngSeed(pixel, i), 1 };
+    
+    RayPayload payload;
+    payload.Color = float3(0.f, 0.f, 0.f);
+    payload.Throughput = float3(1.f, 1.f, 1.f);
+    payload.Bounces = 0;
+    payload.RngState = InitRngSeed(pixel, i);
 
     TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
 
-    accum += payload.Color.rgb;
+    accum += payload.Color;
   }
 
   s_film[DispatchRaysIndex().xy] = float4(accum / (float)numSamples, 1.f);
@@ -230,9 +236,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   float3 lightEmissive = 10.f;
 
-  payload.Color = float4(0.f, 0.f, 0.f, 1.f);
-
-  if (payload.RecursionDepth < 1) {
+  if (payload.Bounces <= 3) {
     float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
 
     float3 nx = 0.f;
@@ -248,18 +252,20 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
     ray.Direction = rayDir;
     ray.TMin = 0.0;
     ray.TMax = 10000.0;
-    RayPayload reflectPayload = { float4(0.f, 0.f, 0.f, 0.f), payload.RngState, 
-                                  payload.RecursionDepth + 1 };
-
-    TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, reflectPayload);
-
-    float3 Li = reflectPayload.Color.rgb;
 
     float3 brdf = Brdf(-normalize(WorldRayDirection()), rayDir, normal, 
                        s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
                        s_material.Roughness.BaseColorFactor.rgb);        
 
-    payload.Color.rgb += brdf * dot(rayDir, normal) * Li / pdf;
+    RayPayload reflectPayload;
+    reflectPayload.Color = float3(0.f, 0.f, 0.f);
+    reflectPayload.Throughput = payload.Throughput * brdf * dot(rayDir, normal) / pdf;
+    reflectPayload.Bounces = payload.Bounces + 1;
+    reflectPayload.RngState = payload.RngState;
+
+    TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, reflectPayload);
+
+    payload.Color += reflectPayload.Color;
   }
 
   float lightPtX1 = -0.24f;
@@ -302,12 +308,12 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   float pdf = distSq / (abs(dot(lightNormal, -wi)) * lightArea);
 
-  payload.Color.rgb += isIlluminated * brdf * dot(lightDir, normal) * lightEmissive / pdf;
+  payload.Color += isIlluminated * payload.Throughput * brdf * dot(lightDir, normal) * lightEmissive / pdf;
 }
 
 [shader("miss")]
 void LightMissShader(inout RayPayload payload) {
-  payload.Color = float4(0.f, 0.f, 0.f, 1.f);
+  payload.Color = float3(0.f, 0.f, 0.f);
 }
 
 [shader("miss")]
