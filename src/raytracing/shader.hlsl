@@ -236,7 +236,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   float3 lightEmissive = 50.f;
 
-  if (payload.Bounces <= 3) {
+  if (payload.Bounces < 1) {
     float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
 
     float3 nx = 0.f;
@@ -261,7 +261,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
     reflectPayload.Color = float3(0.f, 0.f, 0.f);
     reflectPayload.Throughput = payload.Throughput * brdf * dot(rayDir, normal) / pdf;
     reflectPayload.Bounces = payload.Bounces + 1;
-    reflectPayload.RngState = payload.RngState;
+    reflectPayload.RngState = payload.RngState ^ JenkinsHash(reflectPayload.Bounces);
 
     TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, reflectPayload);
 
@@ -311,7 +311,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
 [shader("miss")]
 void LightMissShader(inout RayPayload payload) {
-  payload.Color = float3(0.f, 0.f, 0.f);
+  payload.Color = float3(.2f, .2f, .2f);
 }
 
 [shader("miss")]
