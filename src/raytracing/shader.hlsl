@@ -234,7 +234,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   uint rngState = payload.RngState;
 
-  float3 lightEmissive = 50.f;
+  float3 lightEmissive = 70.f;
 
   if (payload.Bounces < 4) {
     float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
@@ -306,7 +306,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float lightArea = (lightPtX2 - lightPtX1) * (lightPtZ2 - lightPtZ1);
   float pdf = distSq / (abs(dot(lightNormal, -wi)) * lightArea);
 
-  payload.Color += isIlluminated * payload.Throughput * brdf * dot(lightDir, normal) * lightEmissive / pdf;
+  payload.Color += isIlluminated * payload.Throughput * brdf * max(0.f, dot(lightDir, normal)) * lightEmissive / pdf;
 }
 
 [shader("miss")]
