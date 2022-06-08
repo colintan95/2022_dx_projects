@@ -236,7 +236,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   float3 lightEmissive = 50.f;
 
-  if (payload.Bounces < 1) {
+  if (payload.Bounces < 4) {
     float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
 
     float3 nx = 0.f;
@@ -311,7 +311,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
 [shader("miss")]
 void LightMissShader(inout RayPayload payload) {
-  payload.Color = float3(.2f, .2f, .2f);
+  payload.Color = float3(0.f, 0.f, 0.f);
 }
 
 [shader("miss")]
