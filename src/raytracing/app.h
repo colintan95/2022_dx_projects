@@ -27,17 +27,22 @@ private:
   void CreateCommandQueueAndSwapChain();
   void CreateCommandListAndFence();
 
-  void LoadModel();
+  void CreateAssets();
 
   void CreatePipeline();
   void CreateDescriptorHeap();
 
   void CreateResources();
   void CreateConstantBuffers();
-  void CreateModelBuffers();
+  void CreateGeometryBuffers();
 
   void CreateShaderTables();
   void CreateAccelerationStructures();
+
+  void CreateBlas(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS& inputs,
+                  ID3D12Resource** blas);
+  void CreateTlas(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS& inputs,
+                  ID3D12Resource** tlas);
 
   void MoveToNextFrame();
   void WaitForGpu();
@@ -58,8 +63,15 @@ private:
 
   utils::Scene m_model;
 
+  struct QuadLight {
+    shader::Quad Quad;
+    D3D12_RAYTRACING_AABB Aabb;
+  };
+  QuadLight m_light;
+
   winrt::com_ptr<ID3D12RootSignature> m_globalRootSig;
   winrt::com_ptr<ID3D12RootSignature> m_closestHitRootSig;
+  winrt::com_ptr<ID3D12RootSignature> m_quadIntersectRootSig;
 
   winrt::com_ptr<ID3D12StateObject> m_pipeline;
 
@@ -80,10 +92,15 @@ private:
 
   winrt::com_ptr<ID3D12Resource> m_matrixBuffer;
   winrt::com_ptr<ID3D12Resource> m_materialsBuffer;
+  winrt::com_ptr<ID3D12Resource> m_lightQuadBuffer;
 
   std::vector<winrt::com_ptr<ID3D12Resource>> m_modelBuffers;
+  winrt::com_ptr<ID3D12Resource> m_aabbBuffer;
+
+  std::vector<winrt::com_ptr<ID3D12Resource>> m_scratchResources;
 
   winrt::com_ptr<ID3D12Resource> m_blas;
+  winrt::com_ptr<ID3D12Resource> m_aabbBlas;
   winrt::com_ptr<ID3D12Resource> m_tlas;
 
   struct Frame {

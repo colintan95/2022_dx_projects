@@ -234,7 +234,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   uint rngState = payload.RngState;
 
-  float3 lightEmissive = 70.f;
+  float3 lightEmissive = 100.f;
 
   if (payload.Bounces < 4) {
     float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
@@ -268,11 +268,11 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
     payload.Color += reflectPayload.Color;
   }
 
-  float lightPtX1 = -0.24f;
-  float lightPtX2 = 0.23f;
+  float lightPtX1 = -0.25f;
+  float lightPtX2 = 0.25f;
 
-  float lightPtZ1 = -0.22f;
-  float lightPtZ2 = 0.16f;
+  float lightPtZ1 = -0.25f;
+  float lightPtZ2 = 0.25f;
 
   float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.98f,
                       lerp(lightPtZ1, lightPtZ2, Rand(rngState))};
@@ -310,11 +310,73 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 }
 
 [shader("miss")]
-void LightMissShader(inout RayPayload payload) {
+void LightRayMissShader(inout RayPayload payload) {
   payload.Color = float3(0.f, 0.f, 0.f);
 }
 
 [shader("miss")]
-void ShadowMissShader(inout ShadowRayPayload payload) {
+void ShadowRayMissShader(inout ShadowRayPayload payload) {
   payload.IsOccluded = false;
+}
+
+ConstantBuffer<shader::Quad> s_quad : register(b3);
+
+struct QuadIntersectAttributes {
+  float Nothing;
+};
+
+[shader("intersection")]
+void QuadIntersectShader() {
+  // shader::Quad quad = s_quad;
+  shader::Quad quad;
+  quad.BlasToAabb = float4x4(1.f, 0.f, 0.f, 0.f,
+                             0.f, 1.f, 0.f, 0.f,
+                             0.f, 0.f, 1.f, 0.f,
+                             0.f, -1.98f, 0.f, 1.f);
+  quad.Width = 0.5f;
+  quad.Height = 0.5f;
+
+  float3 rayOrigin = mul(float4(ObjectRayOrigin(), 1.f), quad.BlasToAabb).xyz;
+  float3 rayDir = mul(ObjectRayDirection(), (float3x3)quad.BlasToAabb);
+
+  float3 quadOrigin = {0.f, 0.f, 0.f};
+  float3 quadNormal = {0.f, 1.f, 0.f};
+
+  float dDotN = dot(rayDir, quadNormal);
+  if (dDotN == 0.f)
+    return;
+
+  float tHit = dot(quadOrigin - rayOrigin, quadNormal) / dDotN;
+  if (tHit < RayTMin() || tHit > RayTCurrent())
+    return;
+
+  float3 intersect = rayOrigin + tHit * rayDir;
+
+  // if (dot(intersect - quadOrigin, quadNormal) != 0.f)
+  //   return;
+
+  float halfWidth = quad.Width / 2.f;
+  float halfHeight = quad.Height / 2.f;
+
+  if (intersect.x > halfWidth || intersect.x < -halfWidth)
+    return;
+
+  if (intersect.z > halfHeight || intersect.z < -halfHeight)
+    return;
+
+  QuadIntersectAttributes attr = (QuadIntersectAttributes)0;
+
+  ReportHit(tHit, 0, attr);
+
+  // QuadIntersectAttributes attr = (QuadIntersectAttributes)1.f;
+  // ReportHit(RayTCurrent(), 0, attr);
+}
+
+[shader("closesthit")]
+void LightClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
+  if (payload.Bounces == 0) {
+    payload.Color = float3(1.f, 1.f, 1.f);
+  } else {
+    payload.Color = float3(0.f, 0.f, 0.f);
+  }
 }
