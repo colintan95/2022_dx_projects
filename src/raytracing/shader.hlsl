@@ -65,7 +65,7 @@ void RayGenShader() {
     ray.Direction = float3(viewportX * 0.414f, viewportY * 0.414f, 1.f);
     ray.TMin = 0.0;
     ray.TMax = 10000.0;
-    
+
     RayPayload payload;
     payload.Color = float3(0.f, 0.f, 0.f);
     payload.Throughput = float3(1.f, 1.f, 1.f);
@@ -145,13 +145,13 @@ float GGX_V(float3 Lo, float3 Li, float3 n, float alpha) {
 
 float3 Brdf(float3 Vo, float3 Vi, float3 n, float roughness, float metallic, float3 baseColor) {
   float3 h = normalize(Vo + Vi);
-  
+
   float3 black = 0.f;
   float3 f0 = lerp(0.04f, baseColor, metallic);
   float alpha = pow(roughness, 2);
 
   float3 fresnel = f0 + (1.f - f0) * pow((1.f - abs(dot(Vo, h))), 5);
-  
+
   float3 cDiff = lerp(baseColor, black, metallic);
 
   float3 diffuse = (1.f - fresnel) * (1.f / PI) * cDiff;
@@ -167,7 +167,7 @@ uint XorShift(inout uint rngState) {
   rngState ^= (rngState >> 17);
   rngState ^= (rngState << 5);
 
-  return rngState; 
+  return rngState;
 }
 
 float uintToFloat(uint x) {
@@ -253,9 +253,9 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
     ray.TMin = 0.0;
     ray.TMax = 10000.0;
 
-    float3 brdf = Brdf(-normalize(WorldRayDirection()), rayDir, normal, 
+    float3 brdf = Brdf(-normalize(WorldRayDirection()), rayDir, normal,
                        s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
-                       s_material.Roughness.BaseColorFactor.rgb);        
+                       s_material.Roughness.BaseColorFactor.rgb);
 
     RayPayload reflectPayload;
     reflectPayload.Color = float3(0.f, 0.f, 0.f);
@@ -274,16 +274,16 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float lightPtZ1 = -0.22f;
   float lightPtZ2 = 0.16f;
 
-  float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.98f, 
+  float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.98f,
                       lerp(lightPtZ1, lightPtZ2, Rand(rngState))};
 
   float3 lightDistVec = lightPos - hitPos;
   float3 lightDir = normalize(lightDistVec);
-  
+
   RayDesc shadowRay;
   shadowRay.Origin = hitPos;
   shadowRay.Direction = lightDir;
-  shadowRay.TMin = 0.0;
+  shadowRay.TMin = 0.001f;
   shadowRay.TMax = length(lightDistVec);
   ShadowRayPayload shadowPayload = { true };
 
@@ -292,9 +292,9 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
           RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, ~0, 0, 1, 1, shadowRay,
           shadowPayload);
 
-  float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal, 
+  float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal,
                      s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
-                     s_material.Roughness.BaseColorFactor.rgb);        
+                     s_material.Roughness.BaseColorFactor.rgb);
 
   float isIlluminated = shadowPayload.IsOccluded ? 0.0 : 1.0;
 
