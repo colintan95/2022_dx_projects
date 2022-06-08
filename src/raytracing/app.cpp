@@ -653,7 +653,7 @@ void App::CreateAccelerationStructures() {
     aabbInstanceDesc.Transform[0][0] = 1;
     aabbInstanceDesc.Transform[1][1] = 1;
     aabbInstanceDesc.Transform[2][2] = 1;
-    aabbInstanceDesc.InstanceMask = 1;
+    aabbInstanceDesc.InstanceMask = 2;
     aabbInstanceDesc.InstanceContributionToHitGroupIndex = geometryDescs.size();
     aabbInstanceDesc.AccelerationStructure = m_aabbBlas->GetGPUVirtualAddress();
 

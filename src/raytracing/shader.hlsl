@@ -234,7 +234,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   uint rngState = payload.RngState;
 
-  float3 lightEmissive = 100.f;
+  float3 lightEmissive = 40.f;
 
   if (payload.Bounces < 4) {
     float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
@@ -289,8 +289,9 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   TraceRay(s_scene,
           RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
-          RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, ~0, 0, 1, 1, shadowRay,
-          shadowPayload);
+          RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+          ~0 & (~2), // skips the light geometry - instance mask for the light is 2
+          0, 1, 1, shadowRay, shadowPayload);
 
   float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal,
                      s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
