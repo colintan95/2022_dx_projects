@@ -1,9 +1,16 @@
 #include "shader.h"
 
+struct SampleConstants {
+  uint CurrentSample;
+  uint SampleIncrement;
+  uint NumBounces;
+};
+
 // Global descriptors.
 
 RaytracingAccelerationStructure s_scene : register(t0);
 RWTexture2D<float4> s_film : register(u0);
+ConstantBuffer<SampleConstants> s_sampleConstants : register(b0);
 
 // Closest hit descriptors.
 
@@ -11,11 +18,11 @@ struct ClosestHitMatrices {
   float3x4 Transform;
 };
 
-ByteAddressBuffer s_normalBuffer : register(t1);
-ByteAddressBuffer s_indexBuffer : register(t2);
-ConstantBuffer<ClosestHitMatrices> s_matrixBuffer : register(b0);
-ConstantBuffer<Material> s_material : register(b1);
-ConstantBuffer<ClosestHitConstants> s_closestHitConstants : register(b2);
+ByteAddressBuffer s_normalBuffer : register(t0, space1);
+ByteAddressBuffer s_indexBuffer : register(t1, space1);
+ConstantBuffer<ClosestHitMatrices> s_matrixBuffer : register(b0, space1);
+ConstantBuffer<Material> s_material : register(b1, space1);
+ConstantBuffer<ClosestHitConstants> s_closestHitConstants : register(b2, space1);
 
 // ConstantBuffer<RayGenConstantBuffer> s_rayGenConstants : register(b0);
 
@@ -55,29 +62,33 @@ void RayGenShader() {
 
   uint2 pixel = DispatchRaysIndex().xy;
 
+  RayDesc ray;
+  ray.Origin = float3(0.f, 1.f, -4.f);
+  ray.Direction = float3(viewportX * 0.414f, viewportY * 0.414f, 1.f);
+  ray.TMin = 0.0;
+  ray.TMax = 10000.0;
+
+  float n = s_sampleConstants.CurrentSample;
+  float k = s_sampleConstants.SampleIncrement;
+
   float3 accum = 0.f;
 
-  int numSamples = 100;
-
-  for (int i = 0; i < numSamples; ++i) {
-    RayDesc ray;
-    ray.Origin = float3(0.f, 1.f, -4.f);
-    ray.Direction = float3(viewportX * 0.414f, viewportY * 0.414f, 1.f);
-    ray.TMin = 0.0;
-    ray.TMax = 10000.0;
-
+  for (int i = 0; i < k; ++i) {
     RayPayload payload;
     payload.Color = float3(0.f, 0.f, 0.f);
     payload.Throughput = float3(1.f, 1.f, 1.f);
     payload.Bounces = 0;
-    payload.RngState = InitRngSeed(pixel, i);
+    payload.RngState = InitRngSeed(pixel, n + i);
 
     TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
 
     accum += payload.Color;
   }
 
-  s_film[DispatchRaysIndex().xy] = float4(accum / (float)numSamples, 1.f);
+  float3 prevFilmVal = s_film[DispatchRaysIndex().xy].rgb;
+
+  s_film[DispatchRaysIndex().xy].rgb = (1.f / (n + k)) * (n * prevFilmVal + accum);
+  s_film[DispatchRaysIndex().xy].a = 1.f;
 }
 
 typedef BuiltInTriangleIntersectionAttributes IntersectAttributes;
@@ -236,7 +247,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   float3 lightEmissive = 40.f;
 
-  if (payload.Bounces < 4) {
+  if (payload.Bounces < s_sampleConstants.NumBounces) {
     float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
 
     float3 nx = 0.f;

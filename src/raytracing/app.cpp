@@ -4,6 +4,8 @@
 #include <DirectXMath.h>
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <vector>
 
 #include <utils/memory.h>
@@ -151,13 +153,13 @@ void App::CreateAssets() {
 void App::CreatePipeline() {
   // Global root signature
   {
-    CD3DX12_DESCRIPTOR_RANGE1 ranges[2] = {};
-    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
-    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    CD3DX12_DESCRIPTOR_RANGE1 range{};
+    range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
 
-    CD3DX12_ROOT_PARAMETER1 rootParams[2] = {};
-    rootParams[0].InitAsDescriptorTable(1, &ranges[0]);
+    CD3DX12_ROOT_PARAMETER1 rootParams[3] = {};
+    rootParams[0].InitAsDescriptorTable(1, &range);
     rootParams[1].InitAsShaderResourceView(0);
+    rootParams[2].InitAsConstants(3, 0);
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSigDesc;
     rootSigDesc.Init_1_1(_countof(rootParams), rootParams);
@@ -174,11 +176,11 @@ void App::CreatePipeline() {
   // Closest hit root signature
   {
     CD3DX12_ROOT_PARAMETER1 rootParams[5] = {};
-    rootParams[0].InitAsShaderResourceView(1);
-    rootParams[1].InitAsShaderResourceView(2);
-    rootParams[2].InitAsConstantBufferView(0);
-    rootParams[3].InitAsConstantBufferView(1);
-    rootParams[4].InitAsConstants(1, 2);
+    rootParams[0].InitAsShaderResourceView(0, 1);
+    rootParams[1].InitAsShaderResourceView(1, 1);
+    rootParams[2].InitAsConstantBufferView(0, 1);
+    rootParams[3].InitAsConstantBufferView(1, 1);
+    rootParams[4].InitAsConstants(1, 2, 1);
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSigDesc;
     rootSigDesc.Init_1_1(_countof(rootParams), rootParams, 0, nullptr,
@@ -272,7 +274,7 @@ void App::CreatePipeline() {
 
   auto* pipelineConfig =
       pipelineDesc.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
-  uint32_t maxRecursionDepth = 6;
+  uint32_t maxRecursionDepth = k_numBounces + 2;
   pipelineConfig->Config(maxRecursionDepth);
 
   check_hresult(m_device->CreateStateObject(pipelineDesc, IID_PPV_ARGS(m_pipeline.put())));
@@ -797,33 +799,38 @@ void App::RenderFrame() {
     m_cmdList->ResourceBarrier(1, &barrier);
   }
 
-  m_cmdList->SetComputeRootSignature(m_globalRootSig.get());
+  if (m_currentSample <= k_maxSamples) {
+    m_cmdList->SetComputeRootSignature(m_globalRootSig.get());
 
-  ID3D12DescriptorHeap* descriptorHeaps[] = { m_descriptorHeap.get() };
-  m_cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+    ID3D12DescriptorHeap* descriptorHeaps[] = { m_descriptorHeap.get() };
+    m_cmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-  m_cmdList->SetComputeRootDescriptorTable(0, m_filmUavGpuHandle);
-  m_cmdList->SetComputeRootShaderResourceView(1, m_tlas->GetGPUVirtualAddress());
+    m_cmdList->SetComputeRootDescriptorTable(0, m_filmUavGpuHandle);
+    m_cmdList->SetComputeRootShaderResourceView(1, m_tlas->GetGPUVirtualAddress());
 
-  D3D12_DISPATCH_RAYS_DESC dispatchDesc{};
+    uint32_t sampleConstants[] = { m_currentSample, k_sampleIncrement, k_numBounces };
+    m_cmdList->SetComputeRoot32BitConstants(2, 3, &sampleConstants[0], 0);
 
-  dispatchDesc.RayGenerationShaderRecord.StartAddress = m_rayGenShaderTable->GetGPUVirtualAddress();
-  dispatchDesc.RayGenerationShaderRecord.SizeInBytes = m_rayGenShaderTable->GetDesc().Width;
+    D3D12_DISPATCH_RAYS_DESC dispatchDesc{};
 
-  dispatchDesc.HitGroupTable.StartAddress = m_hitGroupShaderTable->GetGPUVirtualAddress();
-  dispatchDesc.HitGroupTable.SizeInBytes = m_hitGroupShaderTable->GetDesc().Width;
-  dispatchDesc.HitGroupTable.StrideInBytes = m_hitGroupShaderRecordSize;
+    dispatchDesc.RayGenerationShaderRecord.StartAddress = m_rayGenShaderTable->GetGPUVirtualAddress();
+    dispatchDesc.RayGenerationShaderRecord.SizeInBytes = m_rayGenShaderTable->GetDesc().Width;
 
-  dispatchDesc.MissShaderTable.StartAddress = m_missShaderTable->GetGPUVirtualAddress();
-  dispatchDesc.MissShaderTable.SizeInBytes = m_missShaderTable->GetDesc().Width;
-  dispatchDesc.MissShaderTable.StrideInBytes = m_missShaderRecordStride;
+    dispatchDesc.HitGroupTable.StartAddress = m_hitGroupShaderTable->GetGPUVirtualAddress();
+    dispatchDesc.HitGroupTable.SizeInBytes = m_hitGroupShaderTable->GetDesc().Width;
+    dispatchDesc.HitGroupTable.StrideInBytes = m_hitGroupShaderRecordSize;
 
-  dispatchDesc.Width = m_window->GetWidth();
-  dispatchDesc.Height = m_window->GetHeight();
-  dispatchDesc.Depth = 1;
+    dispatchDesc.MissShaderTable.StartAddress = m_missShaderTable->GetGPUVirtualAddress();
+    dispatchDesc.MissShaderTable.SizeInBytes = m_missShaderTable->GetDesc().Width;
+    dispatchDesc.MissShaderTable.StrideInBytes = m_missShaderRecordStride;
 
-  m_cmdList->SetPipelineState1(m_pipeline.get());
-  m_cmdList->DispatchRays(&dispatchDesc);
+    dispatchDesc.Width = m_window->GetWidth();
+    dispatchDesc.Height = m_window->GetHeight();
+    dispatchDesc.Depth = 1;
+
+    m_cmdList->SetPipelineState1(m_pipeline.get());
+    m_cmdList->DispatchRays(&dispatchDesc);
+  }
 
   {
     D3D12_RESOURCE_BARRIER barriers[2] = {};
@@ -876,6 +883,9 @@ void App::MoveToNextFrame() {
                                                 m_fenceEvent.get()));
     WaitForSingleObjectEx(m_fenceEvent.get(), INFINITE, false);
   }
+
+  if (m_currentSample <= k_maxSamples)
+    m_currentSample += k_sampleIncrement;
 }
 
 void App::WaitForGpu() {

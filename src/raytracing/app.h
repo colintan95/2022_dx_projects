@@ -15,6 +15,10 @@
 
 inline constexpr int k_numFrames = 3;
 
+inline constexpr uint32_t k_maxSamples = 1000;
+inline constexpr uint32_t k_sampleIncrement = 10;
+inline constexpr uint32_t k_numBounces = 8;
+
 class App {
 public:
   App(utils::Window* window);
@@ -112,4 +116,6 @@ private:
   Frame m_frames[k_numFrames];
 
   int m_currentFrame = 0;
+
+  uint32_t m_currentSample = 1;
 };
