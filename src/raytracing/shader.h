@@ -9,14 +9,10 @@ using XMFLOAT4A = DirectX::XMFLOAT4A;
 using XMFLOAT4X4A = DirectX::XMFLOAT4X4A;
 #endif
 
-struct Roughness {
-  XMFLOAT4A BaseColorFactor;
-  float MetallicFactor;
-  float RoughnessFactor;
-};
-
 struct Material {
-  Roughness Roughness;
+  XMFLOAT4A BaseColor;
+  float Metallic;
+  float Roughness;
 };
 
 struct ClosestHitConstants {

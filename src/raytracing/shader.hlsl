@@ -27,11 +27,13 @@ ConstantBuffer<ClosestHitConstants> s_closestHitConstants : register(b2, space1)
 // ConstantBuffer<RayGenConstantBuffer> s_rayGenConstants : register(b0);
 
 struct RayPayload {
-  float3 Color;
+  float3 L;
   float3 Throughput;
   uint Bounces;
   uint RngState;
 };
+
+// RNG taken from Ch14 of Ray Tracing Gems II.
 
 uint JenkinsHash(uint x) {
   x += x << 10;
@@ -42,8 +44,6 @@ uint JenkinsHash(uint x) {
 
   return x;
 }
-
-// RNG taken from Ch14 of Ray Tracing Gems II.
 
 uint InitRngSeed(uint2 pixel, uint sampleVal) {
   uint rngState = dot(pixel, uint2(1, 10000)) ^ JenkinsHash(sampleVal);
@@ -58,12 +58,12 @@ uint XorShift(inout uint rngState) {
   return rngState;
 }
 
-float uintToFloat(uint x) {
-  return asfloat(0x3f800000 | (x >> 9)) - 1.f;
+float RngStateToFloat(uint rngState) {
+  return asfloat(0x3f800000 | (rngState >> 9)) - 1.f;
 }
 
 float Rand(inout uint rngState) {
-  return uintToFloat(XorShift(rngState));
+  return RngStateToFloat(XorShift(rngState));
 }
 
 [shader("raygeneration")]
@@ -79,9 +79,11 @@ void RayGenShader() {
   uint2 screenPixel = DispatchRaysIndex().xy;
   uint rngState = InitRngSeed(screenPixel, n);
 
-  float3 accum = 0.f;
+  float3 accumL = 0.f;
 
-  for (int i = 0; i < 4; ++i) {
+  uint screenSamples = 4;
+
+  for (int i = 0; i < screenSamples; ++i) {
     float2 sampledPixel = screenPixel + float2(Rand(rngState), Rand(rngState));
 
     float2 lerpValues = sampledPixel / (float2)DispatchRaysDimensions();
@@ -92,27 +94,27 @@ void RayGenShader() {
     RayDesc ray;
     ray.Origin = float3(0.f, 1.f, -4.f);
     ray.Direction = float3(viewportX * 0.414f, viewportY * 0.414f, 1.f);
-    ray.TMin = 0.0;
-    ray.TMax = 10000.0;
+    ray.TMin = 0.f;
+    ray.TMax = 10000.f;
 
     for (int j = 0; j < k; ++j) {
       RayPayload payload;
-      payload.Color = float3(0.f, 0.f, 0.f);
+      payload.L = float3(0.f, 0.f, 0.f);
       payload.Throughput = float3(1.f, 1.f, 1.f);
       payload.Bounces = 0;
       payload.RngState = InitRngSeed(screenPixel, n + j);
 
       TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
 
-      accum += payload.Color;
+      accumL += payload.L;
     }
   }
 
-  accum /= 4.f;
+  accumL /= (float)screenSamples;
 
-  float3 prevFilmVal = s_film[DispatchRaysIndex().xy].rgb;
+  float3 prevFilmVal = s_film[screenPixel].rgb;
 
-  s_film[screenPixel].rgb = (1.f / (n + k)) * (n * prevFilmVal + accum);
+  s_film[screenPixel].rgb = (1.f / (n + k)) * (n * prevFilmVal + accumL);
   s_film[screenPixel].a = 1.f;
 }
 
@@ -155,7 +157,7 @@ struct ShadowRayPayload {
 
 static const float PI = 3.14159265f;
 
-float GGX_D(float3 n, float3 h, float alpha) {
+float TrowbridgeReitzGGX_Microfacet(float3 n, float3 h, float alpha) {
   float alphaSq = alpha * alpha;
   float nDotH = dot(n, h);
 
@@ -164,43 +166,46 @@ float GGX_D(float3 n, float3 h, float alpha) {
   return alphaSq / (PI * f * f);
 }
 
-float GGX_V(float3 Lo, float3 Li, float3 n, float alpha) {
+float TrowbridgeReitzGGX_Visibility(float3 wo, float3 wi, float3 n, float alpha) {
   float alphaSq = alpha * alpha;
-  float nDotLo = dot(n, Lo);
-  float nDotLi = dot(n, Li);
+  float nDotwo = dot(n, wo);
+  float nDotwi = dot(n, wi);
 
-  float denom1 = nDotLo * sqrt(nDotLi * nDotLi * (1.f - alphaSq) + alphaSq);
-  float denom2 = nDotLi * sqrt(nDotLo * nDotLo * (1.f - alphaSq) + alphaSq);
+  float denom1 = nDotwo * sqrt(nDotwi * nDotwi * (1.f - alphaSq) + alphaSq);
+  float denom2 = nDotwi * sqrt(nDotwo * nDotwo * (1.f - alphaSq) + alphaSq);
 
   float denom = denom1 + denom2;
-  if (denom > 0.0)
+  if (denom > 0.f)
     return 0.5f / denom;
 
   return 0.f;
 }
 
-float3 Brdf(float3 Vo, float3 Vi, float3 n, float roughness, float metallic, float3 baseColor) {
-  float3 h = normalize(Vo + Vi);
+float3 Brdf(float3 wo, float3 wi, float3 n, float roughness, float metallic, float3 baseColor) {
+  float alpha = pow(roughness, 2);
+  float3 h = normalize(wo + wi);
+
+  float D = TrowbridgeReitzGGX_Microfacet(n, h, alpha);
+  float V = TrowbridgeReitzGGX_Visibility(wo, wi, n, alpha);
 
   float3 black = 0.f;
-  float3 f0 = lerp(0.04f, baseColor, metallic);
-  float alpha = pow(roughness, 2);
-
-  float3 fresnel = f0 + (1.f - f0) * pow((1.f - abs(dot(Vo, h))), 5);
-
   float3 cDiff = lerp(baseColor, black, metallic);
 
+  float3 f0 = lerp(0.04f, baseColor, metallic);
+  float3 fresnel = f0 + (1.f - f0) * pow((1.f - abs(dot(wo, h))), 5);
+
   float3 diffuse = (1.f - fresnel) * (1.f / PI) * cDiff;
-  float3 specular = fresnel * GGX_D(n, h, alpha) * GGX_V(Vo, Vi, n, alpha);
+  float3 specular = fresnel * D * V;
 
   return diffuse + specular;
 }
 
-// From Ch13 of pbrt book.
-float2 ConcentricSampleDisk(float2 randPt) {
-  float2 offset = 2.f * randPt - float2(1.f, 1.f);
+// Sampling from Ch13 of pbrt book.
 
-  if (offset.x == 0 && offset.y == 0) return float2(0.f, 0.f);
+float2 ConcentricSampleDisk(float2 randPt) {
+  float2 offset = 2.f * randPt - 1.f;
+
+  if (offset.x == 0.f && offset.y == 0.f) return 0.f;
 
   float theta = 0.f;
   float r = 0.f;
@@ -252,38 +257,36 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
 
   uint rngState = payload.RngState;
 
-  float3 lightEmissive = 40.f;
+  float3 wo = -normalize(WorldRayDirection());
 
   if (payload.Bounces < s_sampleConstants.NumBounces) {
-    float3 dirSample = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
+    float3 wi = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
 
-    float3 nx = 0.f;
-    float3 nz = 0.f;
+    float3 b1 = 0.f;
+    float3 b2 = 0.f;
+    GetCoordinateSystem(normal, b1, b2);
 
-    GetCoordinateSystem(normal, nx, nz);
-
-    float3 rayDir = normalize(dirSample.x * nx + dirSample.y * normal + dirSample.z * nz);
-    float pdf = dot(rayDir, normal) / PI;
+    wi = normalize(wi.x * b1 + wi.y * normal + wi.z * b2);
+    float pdf = dot(wi, normal) / PI;
 
     RayDesc ray;
     ray.Origin = hitPos;
-    ray.Direction = rayDir;
-    ray.TMin = 0.0;
-    ray.TMax = 10000.0;
+    ray.Direction = wi;
+    ray.TMin = 0.f;
+    ray.TMax = 10000.f;
 
-    float3 brdf = Brdf(-normalize(WorldRayDirection()), rayDir, normal,
-                       s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
-                       s_material.Roughness.BaseColorFactor.rgb);
+    float3 brdf = Brdf(wo, wi, normal, s_material.Roughness, s_material.Metallic,
+                       s_material.BaseColor.rgb);
 
     RayPayload reflectPayload;
-    reflectPayload.Color = float3(0.f, 0.f, 0.f);
-    reflectPayload.Throughput = payload.Throughput * brdf * dot(rayDir, normal) / pdf;
+    reflectPayload.L = float3(0.f, 0.f, 0.f);
+    reflectPayload.Throughput = payload.Throughput * brdf * dot(wi, normal) / pdf;
     reflectPayload.Bounces = payload.Bounces + 1;
     reflectPayload.RngState = payload.RngState ^ JenkinsHash(reflectPayload.Bounces);
 
     TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, reflectPayload);
 
-    payload.Color += reflectPayload.Color;
+    payload.L += reflectPayload.L;
   }
 
   float lightPtX1 = -0.25f;
@@ -292,45 +295,44 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float lightPtZ1 = -0.25f;
   float lightPtZ2 = 0.25f;
 
-  float3 lightPos = {lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.98f,
-                      lerp(lightPtZ1, lightPtZ2, Rand(rngState))};
+  float3 lightSamplePos = float3(lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.98f,
+                                 lerp(lightPtZ1, lightPtZ2, Rand(rngState)));
 
-  float3 lightDistVec = lightPos - hitPos;
-  float3 lightDir = normalize(lightDistVec);
+  float3 lightNormal = float3(0.f, -1.f, 0.f);
+  float lightArea = (lightPtX2 - lightPtX1) * (lightPtZ2 - lightPtZ1);
+  float lightDist = distance(hitPos, lightSamplePos);
+
+  float3 Le = 40.f;
+
+  float3 wi = normalize(lightSamplePos - hitPos);
+  float pdf = (lightDist * lightDist) / (abs(dot(lightNormal, -wi)) * lightArea);
 
   RayDesc shadowRay;
   shadowRay.Origin = hitPos;
-  shadowRay.Direction = lightDir;
+  shadowRay.Direction = wi;
   shadowRay.TMin = 0.001f;
-  shadowRay.TMax = length(lightDistVec);
-  ShadowRayPayload shadowPayload = { true };
+  shadowRay.TMax = lightDist;
+
+  ShadowRayPayload shadowPayload;
+  shadowPayload.IsOccluded = true;
 
   TraceRay(s_scene,
-          RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
-          RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-          ~0 & (~2), // skips the light geometry - instance mask for the light is 2
-          0, 1, 1, shadowRay, shadowPayload);
+           RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
+           RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+           ~0 & (~2), // skips the light geometry - instance mask for the light is 2
+           0, 1, 1, shadowRay, shadowPayload);
 
-  float3 brdf = Brdf(-normalize(WorldRayDirection()), lightDir, normal,
-                     s_material.Roughness.RoughnessFactor, s_material.Roughness.MetallicFactor,
-                     s_material.Roughness.BaseColorFactor.rgb);
+  if (!shadowPayload.IsOccluded) {
+    float3 brdf = Brdf(wo, wi, normal, s_material.Roughness, s_material.Metallic,
+                     s_material.BaseColor.rgb);
 
-  float isIlluminated = shadowPayload.IsOccluded ? 0.0 : 1.0;
-
-  float3 lightNormal = {0.f, -1.f, 0.f};
-
-  float3 wi = normalize(hitPos - lightPos);
-  float distSq = pow(distance(hitPos, lightPos), 2);
-
-  float lightArea = (lightPtX2 - lightPtX1) * (lightPtZ2 - lightPtZ1);
-  float pdf = distSq / (abs(dot(lightNormal, -wi)) * lightArea);
-
-  payload.Color += isIlluminated * payload.Throughput * brdf * max(0.f, dot(lightDir, normal)) * lightEmissive / pdf;
+    payload.L += payload.Throughput * brdf * max(0.f, dot(wi, normal)) * Le / pdf;
+  }
 }
 
 [shader("miss")]
 void LightRayMissShader(inout RayPayload payload) {
-  payload.Color = float3(0.f, 0.f, 0.f);
+  payload.L = float3(0.f, 0.f, 0.f);
 }
 
 [shader("miss")]
@@ -358,8 +360,8 @@ void QuadIntersectShader() {
   float3 rayOrigin = mul(float4(ObjectRayOrigin(), 1.f), quad.BlasToAabb).xyz;
   float3 rayDir = mul(ObjectRayDirection(), (float3x3)quad.BlasToAabb);
 
-  float3 quadOrigin = {0.f, 0.f, 0.f};
-  float3 quadNormal = {0.f, 1.f, 0.f};
+  float3 quadOrigin = float3(0.f, 0.f, 0.f);
+  float3 quadNormal = float3(0.f, 1.f, 0.f);
 
   float dDotN = dot(rayDir, quadNormal);
   if (dDotN == 0.f)
@@ -370,9 +372,6 @@ void QuadIntersectShader() {
     return;
 
   float3 intersect = rayOrigin + tHit * rayDir;
-
-  // if (dot(intersect - quadOrigin, quadNormal) != 0.f)
-  //   return;
 
   float halfWidth = quad.Width / 2.f;
   float halfHeight = quad.Height / 2.f;
@@ -386,16 +385,13 @@ void QuadIntersectShader() {
   QuadIntersectAttributes attr = (QuadIntersectAttributes)0;
 
   ReportHit(tHit, 0, attr);
-
-  // QuadIntersectAttributes attr = (QuadIntersectAttributes)1.f;
-  // ReportHit(RayTCurrent(), 0, attr);
 }
 
 [shader("closesthit")]
-void LightClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
+void LightClosestHitShader(inout RayPayload payload, QuadIntersectAttributes attr) {
   if (payload.Bounces == 0) {
-    payload.Color = float3(1.f, 1.f, 1.f);
+    payload.L = float3(1.f, 1.f, 1.f);
   } else {
-    payload.Color = float3(0.f, 0.f, 0.f);
+    payload.L = float3(0.f, 0.f, 0.f);
   }
 }

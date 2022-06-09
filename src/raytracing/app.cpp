@@ -355,13 +355,13 @@ void App::CreateConstantBuffers() {
     check_hresult(m_materialsBuffer->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
 
     for (utils::Material& material : m_model.Materials) {
-      ptr->Roughness.BaseColorFactor.x = material.PbrMetallicRoughness.BaseColorFactor[0];
-      ptr->Roughness.BaseColorFactor.y = material.PbrMetallicRoughness.BaseColorFactor[1];
-      ptr->Roughness.BaseColorFactor.z = material.PbrMetallicRoughness.BaseColorFactor[2];
-      ptr->Roughness.BaseColorFactor.w = material.PbrMetallicRoughness.BaseColorFactor[3];
+      ptr->BaseColor.x = material.PbrMetallicRoughness.BaseColorFactor[0];
+      ptr->BaseColor.y = material.PbrMetallicRoughness.BaseColorFactor[1];
+      ptr->BaseColor.z = material.PbrMetallicRoughness.BaseColorFactor[2];
+      ptr->BaseColor.w = material.PbrMetallicRoughness.BaseColorFactor[3];
 
-      ptr->Roughness.MetallicFactor = material.PbrMetallicRoughness.MetallicFactor;
-      ptr->Roughness.RoughnessFactor = material.PbrMetallicRoughness.RoughnessFactor;
+      ptr->Metallic = material.PbrMetallicRoughness.MetallicFactor;
+      ptr->Roughness = material.PbrMetallicRoughness.RoughnessFactor;
 
       ++ptr;
     }
