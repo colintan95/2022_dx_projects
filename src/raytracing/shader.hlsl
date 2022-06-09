@@ -43,52 +43,77 @@ uint JenkinsHash(uint x) {
   return x;
 }
 
+// RNG taken from Ch14 of Ray Tracing Gems II.
+
 uint InitRngSeed(uint2 pixel, uint sampleVal) {
   uint rngState = dot(pixel, uint2(1, 10000)) ^ JenkinsHash(sampleVal);
   return JenkinsHash(rngState);
 }
 
+uint XorShift(inout uint rngState) {
+  rngState ^= (rngState << 13);
+  rngState ^= (rngState >> 17);
+  rngState ^= (rngState << 5);
+
+  return rngState;
+}
+
+float uintToFloat(uint x) {
+  return asfloat(0x3f800000 | (x >> 9)) - 1.f;
+}
+
+float Rand(inout uint rngState) {
+  return uintToFloat(XorShift(rngState));
+}
+
 [shader("raygeneration")]
 void RayGenShader() {
-  float2 lerpValues = (float2)DispatchRaysIndex() / (float2)DispatchRaysDimensions();
-
   // float viewportX = lerp(s_rayGenConstants.Viewport.Left, s_rayGenConstants.Viewport.Right,
   //                         lerpValues.x);
   // float viewportY = lerp(s_rayGenConstants.Viewport.Top, s_rayGenConstants.Viewport.Bottom,
   //                         lerpValues.y);
 
-  float viewportX = lerp(-1.33f, 1.33f, lerpValues.x);
-  float viewportY = lerp(1.f, -1.f, lerpValues.y);
-
-  uint2 pixel = DispatchRaysIndex().xy;
-
-  RayDesc ray;
-  ray.Origin = float3(0.f, 1.f, -4.f);
-  ray.Direction = float3(viewportX * 0.414f, viewportY * 0.414f, 1.f);
-  ray.TMin = 0.0;
-  ray.TMax = 10000.0;
-
   float n = s_sampleConstants.CurrentSample;
   float k = s_sampleConstants.SampleIncrement;
 
+  uint2 screenPixel = DispatchRaysIndex().xy;
+  uint rngState = InitRngSeed(screenPixel, n);
+
   float3 accum = 0.f;
 
-  for (int i = 0; i < k; ++i) {
-    RayPayload payload;
-    payload.Color = float3(0.f, 0.f, 0.f);
-    payload.Throughput = float3(1.f, 1.f, 1.f);
-    payload.Bounces = 0;
-    payload.RngState = InitRngSeed(pixel, n + i);
+  for (int i = 0; i < 4; ++i) {
+    float2 sampledPixel = screenPixel + float2(Rand(rngState), Rand(rngState));
 
-    TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+    float2 lerpValues = sampledPixel / (float2)DispatchRaysDimensions();
 
-    accum += payload.Color;
+    float viewportX = lerp(-1.33f, 1.33f, lerpValues.x);
+    float viewportY = lerp(1.f, -1.f, lerpValues.y);
+
+    RayDesc ray;
+    ray.Origin = float3(0.f, 1.f, -4.f);
+    ray.Direction = float3(viewportX * 0.414f, viewportY * 0.414f, 1.f);
+    ray.TMin = 0.0;
+    ray.TMax = 10000.0;
+
+    for (int j = 0; j < k; ++j) {
+      RayPayload payload;
+      payload.Color = float3(0.f, 0.f, 0.f);
+      payload.Throughput = float3(1.f, 1.f, 1.f);
+      payload.Bounces = 0;
+      payload.RngState = InitRngSeed(screenPixel, n + j);
+
+      TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+
+      accum += payload.Color;
+    }
   }
+
+  accum /= 4.f;
 
   float3 prevFilmVal = s_film[DispatchRaysIndex().xy].rgb;
 
-  s_film[DispatchRaysIndex().xy].rgb = (1.f / (n + k)) * (n * prevFilmVal + accum);
-  s_film[DispatchRaysIndex().xy].a = 1.f;
+  s_film[screenPixel].rgb = (1.f / (n + k)) * (n * prevFilmVal + accum);
+  s_film[screenPixel].a = 1.f;
 }
 
 typedef BuiltInTriangleIntersectionAttributes IntersectAttributes;
@@ -169,24 +194,6 @@ float3 Brdf(float3 Vo, float3 Vi, float3 n, float roughness, float metallic, flo
   float3 specular = fresnel * GGX_D(n, h, alpha) * GGX_V(Vo, Vi, n, alpha);
 
   return diffuse + specular;
-}
-
-// RNG taken from Ch14 of Ray Tracing Gems II.
-
-uint XorShift(inout uint rngState) {
-  rngState ^= (rngState << 13);
-  rngState ^= (rngState >> 17);
-  rngState ^= (rngState << 5);
-
-  return rngState;
-}
-
-float uintToFloat(uint x) {
-  return asfloat(0x3f800000 | (x >> 9)) - 1.f;
-}
-
-float Rand(inout uint rngState) {
-  return uintToFloat(XorShift(rngState));
 }
 
 // From Ch13 of pbrt book.
