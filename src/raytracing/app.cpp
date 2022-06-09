@@ -195,7 +195,7 @@ void App::CreatePipeline() {
                                                 IID_PPV_ARGS(m_closestHitRootSig.put())));
   }
 
-  // Quad intersect shader root signature
+  // Quad intersect root signature
   {
     CD3DX12_ROOT_PARAMETER1 rootParam;
     rootParam.InitAsConstantBufferView(3);
@@ -430,38 +430,52 @@ void App::CreateGeometryBuffers() {
 #pragma warning(push)
 #pragma warning(disable:4324)
 
-struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) RayGenShaderRecord {
-  uint8_t ShaderId[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+#define SHADER_RECORD_ALIGN alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT)
+#define ALIGNED_TYPE(x) alignas(sizeof(x)) x
+
+using ShaderId = uint8_t[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+
+struct SHADER_RECORD_ALIGN RayGenShaderRecord {
+  ShaderId ShaderId;
 };
 
-struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) HitGroupShaderRecord {
-  uint8_t ShaderId[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
-  alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS NormalBuffer;
-  alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS IndexBuffer;
-  alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS MatrixBuffer;
-  alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS Material;
-  alignas(sizeof(ClosestHitConstants)) ClosestHitConstants Constants;
+struct SHADER_RECORD_ALIGN GeomHitGroupShaderRecord {
+  ShaderId ShaderId;
+  ALIGNED_TYPE(D3D12_GPU_VIRTUAL_ADDRESS) NormalBuffer;
+  ALIGNED_TYPE(D3D12_GPU_VIRTUAL_ADDRESS) IndexBuffer;
+  ALIGNED_TYPE(D3D12_GPU_VIRTUAL_ADDRESS) MatrixBuffer;
+  ALIGNED_TYPE(D3D12_GPU_VIRTUAL_ADDRESS) Material;
+  ALIGNED_TYPE(ClosestHitConstants) Constants;
 };
 
-struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) LightHitGroupShaderRecord {
-  uint8_t ShaderId[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
-  alignas(sizeof(D3D12_GPU_VIRTUAL_ADDRESS)) D3D12_GPU_VIRTUAL_ADDRESS Quad;
+struct SHADER_RECORD_ALIGN LightHitGroupShaderRecord {
+  ShaderId ShaderId;
+  ALIGNED_TYPE(D3D12_GPU_VIRTUAL_ADDRESS) Quad;
 };
 
-struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) LightRayMissShaderRecord {
-  uint8_t ShaderId[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+union SHADER_RECORD_ALIGN HitGroupShaderRecord {
+  GeomHitGroupShaderRecord Geom;
+  LightHitGroupShaderRecord Light;
 };
 
-struct alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) ShadowRayMissShaderRecord {
-  uint8_t ShaderId[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+struct SHADER_RECORD_ALIGN LightRayMissShaderRecord {
+  ShaderId ShaderId;
 };
 
-union alignas(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT) MissShaderRecord {
-  LightRayMissShaderRecord LightRayMissShaderRecord;
-  ShadowRayMissShaderRecord ShadowRayMissShaderRecord;
+struct SHADER_RECORD_ALIGN ShadowRayMissShaderRecord {
+  ShaderId ShaderId;
+};
+
+union SHADER_RECORD_ALIGN MissShaderRecord {
+  LightRayMissShaderRecord LightRay;
+  ShadowRayMissShaderRecord ShadowRay;
 };
 
 #pragma warning(pop)
+
+static void CopyShaderId(ShaderId& dst, void* src) {
+  memcpy(dst, src, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+}
 
 void App::CreateShaderTables() {
   com_ptr<ID3D12StateObjectProperties> pipelineProps;
@@ -481,19 +495,18 @@ void App::CreateShaderTables() {
     RayGenShaderRecord* ptr;
     check_hresult(m_rayGenShaderTable->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
 
-    memcpy(ptr->ShaderId, shaderId, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    CopyShaderId(ptr->ShaderId, shaderId);
 
     m_rayGenShaderTable->Unmap(0, nullptr);
   }
 
   {
+    m_hitGroupShaderRecordSize = sizeof(HitGroupShaderRecord);
+
     size_t numPrims = 0;
     for (auto& meshData : m_model.Meshes) {
       numPrims += meshData.Primitives.size();
     }
-
-    m_hitGroupShaderRecordSize = std::max(sizeof(HitGroupShaderRecord),
-                                          sizeof(LightHitGroupShaderRecord));
 
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
     CD3DX12_RESOURCE_DESC bufferDesc =
@@ -504,7 +517,7 @@ void App::CreateShaderTables() {
                                                     nullptr,
                                                     IID_PPV_ARGS(m_hitGroupShaderTable.put())));
 
-    uint8_t* ptr;
+    HitGroupShaderRecord* ptr;
     check_hresult(m_hitGroupShaderTable->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
 
     {
@@ -512,23 +525,21 @@ void App::CreateShaderTables() {
 
       for (auto& meshData : m_model.Meshes) {
         for (auto& primData : meshData.Primitives) {
-          HitGroupShaderRecord* hitGroupPtr = reinterpret_cast<HitGroupShaderRecord*>(ptr);
-
           utils::BufferView* normalBufferView = primData.Normals->BufferView;
           utils::BufferView* indexBufferView = primData.Indices->BufferView;
 
           ID3D12Resource* normalBuffer = m_modelBuffers[normalBufferView->BufferIndex].get();
           ID3D12Resource* indexBuffer = m_modelBuffers[indexBufferView->BufferIndex].get();
 
-          memcpy(hitGroupPtr->ShaderId, shaderId, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-          hitGroupPtr->NormalBuffer = normalBuffer->GetGPUVirtualAddress() + normalBufferView->Offset;
-          hitGroupPtr->IndexBuffer = indexBuffer->GetGPUVirtualAddress() + indexBufferView->Offset;
-          hitGroupPtr->MatrixBuffer = m_matrixBuffer->GetGPUVirtualAddress();
-          hitGroupPtr->Material = m_materialsBuffer->GetGPUVirtualAddress() +
-                          primData.MaterialIndex * sizeof(Material);
-          hitGroupPtr->Constants.NormalBufferStride = *normalBufferView->Stride;
+          CopyShaderId(ptr->Geom.ShaderId, shaderId);
+          ptr->Geom.NormalBuffer = normalBuffer->GetGPUVirtualAddress() + normalBufferView->Offset;
+          ptr->Geom.IndexBuffer = indexBuffer->GetGPUVirtualAddress() + indexBufferView->Offset;
+          ptr->Geom.MatrixBuffer = m_matrixBuffer->GetGPUVirtualAddress();
+          ptr->Geom.Material = m_materialsBuffer->GetGPUVirtualAddress() +
+                               primData.MaterialIndex * sizeof(Material);
+          ptr->Geom.Constants.NormalBufferStride = *normalBufferView->Stride;
 
-          ptr += m_hitGroupShaderRecordSize;
+          ++ptr;
         }
       }
     }
@@ -536,11 +547,10 @@ void App::CreateShaderTables() {
     {
       void* shaderId = pipelineProps->GetShaderIdentifier(k_lightHitGroupName);
 
-      LightHitGroupShaderRecord* hitGroupPtr = reinterpret_cast<LightHitGroupShaderRecord*>(ptr);
-      memcpy(hitGroupPtr->ShaderId, shaderId, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-      hitGroupPtr->Quad = m_lightQuadBuffer->GetGPUVirtualAddress();
+      CopyShaderId(ptr->Light.ShaderId, shaderId);
+      ptr->Light.Quad = m_lightQuadBuffer->GetGPUVirtualAddress();
 
-      ptr += m_hitGroupShaderRecordSize;
+      ++ptr;
     }
 
     m_hitGroupShaderTable->Unmap(0, nullptr);
@@ -557,18 +567,20 @@ void App::CreateShaderTables() {
                                                     nullptr,
                                                     IID_PPV_ARGS(m_missShaderTable.put())));
 
-    void* lightRayMissShaderId = pipelineProps->GetShaderIdentifier(k_lightRayMissShaderName);
-    void* shadowRayMissShaderId = pipelineProps->GetShaderIdentifier(k_shadowRayMissShaderName);
-
     MissShaderRecord* ptr;
     check_hresult(m_missShaderTable->Map(0, nullptr, reinterpret_cast<void**>(&ptr)));
 
-    memcpy(ptr->LightRayMissShaderRecord.ShaderId, lightRayMissShaderId,
-           D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-    ++ptr;
+    {
+      void* shaderId = pipelineProps->GetShaderIdentifier(k_lightRayMissShaderName);
+      CopyShaderId(ptr->LightRay.ShaderId, shaderId);
+      ++ptr;
+    }
 
-    memcpy(ptr->ShadowRayMissShaderRecord.ShaderId, shadowRayMissShaderId,
-           D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    {
+      void* shaderId = pipelineProps->GetShaderIdentifier(k_shadowRayMissShaderName);
+      CopyShaderId(ptr->ShadowRay.ShaderId, shaderId);
+      ++ptr;
+    }
 
     m_missShaderTable->Unmap(0, nullptr);
   }
@@ -691,7 +703,7 @@ void App::CreateAccelerationStructures() {
   tlasInputs.InstanceDescs = instanceDescsBuffer->GetGPUVirtualAddress();
   tlasInputs.NumDescs = numDescs;
 
-  CreateTlas(tlasInputs,  m_tlas.put());
+  CreateTlas(tlasInputs, m_tlas.put());
 
   check_hresult(m_cmdList->Close());
 
