@@ -229,6 +229,24 @@ float3 CosineSampleHemisphere(float2 randPt) {
   return float3(d.r, y, d.g);
 }
 
+float3 SphericalDirection(float sinTheta, float cosTheta, float phi) {
+  return float3(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));
+}
+
+// From pbrt book.
+float3 TrowbridgeReitzGGX_Sample_wh(float2 randPt, float roughness) {
+  float alpha = roughness * roughness;
+  float phi = 2.f * PI * randPt.g;
+
+  float tanThetaSq = alpha * alpha * randPt.r / (1.f - randPt.r);
+  float cosTheta = 1.f / sqrt(1.f + tanThetaSq);
+  float sinTheta = sqrt(max(0.f, 1.f - cosTheta * cosTheta));
+
+  float3 wh = SphericalDirection(sinTheta, cosTheta, phi);
+
+  return wh;
+}
+
 void GetCoordinateSystem(float3 v1, inout float3 v2, inout float3 v3) {
   if (abs(v1.x) > abs(v1.y)) {
     v2 = float3(-v1.z, 0.f, v1.x) / sqrt(v1.x * v1.x + v1.z * v1.z);
@@ -260,7 +278,9 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float3 wo = -normalize(WorldRayDirection());
 
   if (payload.Bounces < s_sampleConstants.NumBounces) {
-    float3 wi = CosineSampleHemisphere(float2(Rand(rngState), Rand(rngState)));
+    float2 randPt = float2(Rand(rngState), Rand(rngState));
+
+    float3 wi = CosineSampleHemisphere(randPt);
 
     float3 b1 = 0.f;
     float3 b2 = 0.f;
@@ -269,24 +289,47 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
     wi = normalize(wi.x * b1 + wi.y * normal + wi.z * b2);
     float pdf = dot(wi, normal) / PI;
 
-    RayDesc ray;
-    ray.Origin = hitPos;
-    ray.Direction = wi;
-    ray.TMin = 0.f;
-    ray.TMax = 10000.f;
+    bool shouldContinue = true;
 
-    float3 brdf = Brdf(wo, wi, normal, s_material.Roughness, s_material.Metallic,
-                       s_material.BaseColor.rgb);
+    if (s_material.Metallic > 0.5f) {
+      float alpha = s_material.Roughness * s_material.Roughness;
 
-    RayPayload reflectPayload;
-    reflectPayload.L = float3(0.f, 0.f, 0.f);
-    reflectPayload.Throughput = payload.Throughput * brdf * dot(wi, normal) / pdf;
-    reflectPayload.Bounces = payload.Bounces + 1;
-    reflectPayload.RngState = payload.RngState ^ JenkinsHash(reflectPayload.Bounces);
+      float3 wh = TrowbridgeReitzGGX_Sample_wh(randPt, s_material.Roughness);
+      float absCosTheta = abs(wh.y);
 
-    TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, reflectPayload);
+      wh = normalize(wh.x * b1 + wh.y * normal + wh.z * b2);
+      if (dot(normal, wh) < 0.f)
+        wh = -wh;
 
-    payload.L += reflectPayload.L;
+      wi = reflect(-wo, wh);
+
+      if (dot(wi, normal) < 0)
+        shouldContinue = false;
+
+      pdf = TrowbridgeReitzGGX_Microfacet(normal, wh, alpha) * absCosTheta / (4.f * dot(wo, wh));
+      // pdf = TrowbridgeReitzGGX_Microfacet(normal, wh, alpha) / (6.f * dot(wo, wh));
+    }
+
+    if (shouldContinue) {
+      RayDesc ray;
+      ray.Origin = hitPos;
+      ray.Direction = wi;
+      ray.TMin = 0.f;
+      ray.TMax = 10000.f;
+
+      float3 brdf = Brdf(wo, wi, normal, s_material.Roughness, s_material.Metallic,
+                         s_material.BaseColor.rgb);
+
+      RayPayload reflectPayload;
+      reflectPayload.L = float3(0.f, 0.f, 0.f);
+      reflectPayload.Throughput = payload.Throughput * brdf * dot(wi, normal) / pdf;
+      reflectPayload.Bounces = payload.Bounces + 1;
+      reflectPayload.RngState = payload.RngState ^ JenkinsHash(reflectPayload.Bounces);
+
+      TraceRay(s_scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, reflectPayload);
+
+      payload.L += reflectPayload.L;
+    }
   }
 
   float lightPtX1 = -0.25f;
