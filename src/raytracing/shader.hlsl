@@ -352,7 +352,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   RayDesc shadowRay;
   shadowRay.Origin = hitPos;
   shadowRay.Direction = wi;
-  shadowRay.TMin = 0.001f;
+  shadowRay.TMin = 0.0001f;
   shadowRay.TMax = lightDist;
 
   ShadowRayPayload shadowPayload;
