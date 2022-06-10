@@ -307,7 +307,6 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
         shouldContinue = false;
 
       pdf = TrowbridgeReitzGGX_Microfacet(normal, wh, alpha) * absCosTheta / (4.f * dot(wo, wh));
-      // pdf = TrowbridgeReitzGGX_Microfacet(normal, wh, alpha) / (6.f * dot(wo, wh));
     }
 
     if (shouldContinue) {
@@ -338,7 +337,7 @@ void ClosestHitShader(inout RayPayload payload, IntersectAttributes attr) {
   float lightPtZ1 = -0.25f;
   float lightPtZ2 = 0.25f;
 
-  float3 lightSamplePos = float3(lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.98f,
+  float3 lightSamplePos = float3(lerp(lightPtX1, lightPtX2, Rand(rngState)), 1.98999f,
                                  lerp(lightPtZ1, lightPtZ2, Rand(rngState)));
 
   float3 lightNormal = float3(0.f, -1.f, 0.f);
@@ -396,7 +395,7 @@ void QuadIntersectShader() {
   quad.BlasToAabb = float4x4(1.f, 0.f, 0.f, 0.f,
                              0.f, 1.f, 0.f, 0.f,
                              0.f, 0.f, 1.f, 0.f,
-                             0.f, -1.98f, 0.f, 1.f);
+                             0.f, -1.98999f, 0.f, 1.f);
   quad.Width = 0.5f;
   quad.Height = 0.5f;
 

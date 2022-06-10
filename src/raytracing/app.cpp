@@ -130,7 +130,7 @@ void App::CreateAssets() {
   m_model = utils::LoadGltf("assets/cornell_box.gltf");
 
   float quadX = 0.f;
-  float quadY = 1.98f;
+  float quadY = 1.98999f;
   float quadZ = 0.f;
 
   XMMATRIX blasToAabb = XMMatrixTranslation(-quadX, -quadY, -quadZ);
